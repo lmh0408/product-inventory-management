@@ -1,0 +1,6 @@
+{
+  "name": "실시간 재고 관리 및 발주 자동화 시스템",
+  "description": "구글 시트 기반 실시간 재고 현황 파악, 입출고/이동 내역 관리, 안전재고 부족 자동 알림 및 발주 자동화 솔루션",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
