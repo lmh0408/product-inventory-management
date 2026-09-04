@@ -1,8 +1,13 @@
 node_modules/
 build/
 dist/
+.vercel/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
+/api/google-sheet-save.js
+/api/google-sheet/
+/api/package-lock.json
+.vercel
