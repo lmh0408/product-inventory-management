@@ -259,16 +259,17 @@ function appendLedgerRows_(ss, movement) {
   var items = movement.items || [];
   var desc = movement.description || "";
   var date = movement.date || "";
+  var partner = movement.partnerOrRecipient || "";
   if (type === "TRANSFER") {
-    writeLedger_(ss, movement.fromLocation, date, "출고", desc, items, -1);
-    writeLedger_(ss, movement.toLocation, date, "입고", desc, items, 1);
+    writeLedger_(ss, movement.fromLocation, date, "출고", desc, items, -1, partner);
+    writeLedger_(ss, movement.toLocation, date, "입고", desc, items, 1, partner);
     return;
   }
   var loc = movement.locationId || (type === "IN" ? movement.toLocation : movement.fromLocation);
-  writeLedger_(ss, loc, date, type === "IN" ? "입고" : "출고", desc, items, type === "IN" ? 1 : -1);
+  writeLedger_(ss, loc, date, type === "IN" ? "입고" : "출고", desc, items, type === "IN" ? 1 : -1, partner);
 }
 
-function writeLedger_(ss, locationId, date, typeLabel, desc, items, sign) {
+function writeLedger_(ss, locationId, date, typeLabel, desc, items, sign, partner) {
   if (!locationId) return;
   var sheet = findLocationSheet_(ss, locationId);
   if (!sheet) return;
@@ -280,6 +281,7 @@ function writeLedger_(ss, locationId, date, typeLabel, desc, items, sign) {
   rowValues[meta.dateCol - 1] = date;
   rowValues[meta.typeCol - 1] = typeLabel;
   rowValues[meta.descCol - 1] = desc;
+  if (meta.partnerCol) rowValues[meta.partnerCol - 1] = partner || "";
   for (var i = 0; i < items.length; i++) {
     var col = meta.productCols[items[i].productId];
     if (col) rowValues[col - 1] = sign * Number(items[i].quantity || 0);
@@ -294,7 +296,10 @@ function inspectLedger_(sheet) {
   var header = [];
   for (var r = 0; r < Math.min(values.length, 15); r++) {
     var joined = values[r].join(" ");
-    if (/날짜|일자/.test(joined) && /입출고|구분/.test(joined)) {
+    if (
+      (/날짜|일자/.test(joined) && /입출고|구분/.test(joined)) ||
+      (/입출고|구분/.test(joined) && /내역|납품/.test(joined))
+    ) {
       headerRow = r;
       header = values[r];
       break;
@@ -304,17 +309,19 @@ function inspectLedger_(sheet) {
   var dateCol = 1;
   var typeCol = 2;
   var descCol = 3;
+  var partnerCol = 0;
   var productCols = {};
   for (var c = 0; c < header.length; c++) {
     var h = String(header[c] || "");
     if (/날짜|일자/.test(h)) dateCol = c + 1;
     if (/입출고|구분/.test(h)) typeCol = c + 1;
     if (/내역|내용/.test(h)) descCol = c + 1;
+    if (/납품|거래|상대/.test(h)) partnerCol = c + 1;
     var pid = matchProduct_(h);
     if (pid) productCols[pid] = c + 1;
   }
   var last = lastFilledRow_(values, headerRow + 1, dateCol - 1);
-  return { headerRow: headerRow + 1, dateCol: dateCol, typeCol: typeCol, descCol: descCol, productCols: productCols, appendRow: last + 1 };
+  return { headerRow: headerRow + 1, dateCol: dateCol, typeCol: typeCol, descCol: descCol, partnerCol: partnerCol, productCols: productCols, appendRow: last + 1 };
 }
 
 function writeDashboardAndOnHand_(ss, stocks) {

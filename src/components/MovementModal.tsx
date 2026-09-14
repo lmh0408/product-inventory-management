@@ -59,7 +59,6 @@ export const MovementModal: React.FC<MovementModalProps> = ({
 
   const [description, setDescription] = useState<string>('');
   const [partnerOrRecipient, setPartnerOrRecipient] = useState<string>('');
-  const [registeredBy, setRegisteredBy] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [webhookDraft, setWebhookDraft] = useState(sheetWebhookUrl);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -92,7 +91,6 @@ export const MovementModal: React.FC<MovementModalProps> = ({
         );
         setDescription(initialMovement.description || '');
         setPartnerOrRecipient(initialMovement.partnerOrRecipient || '');
-        setRegisteredBy(initialMovement.registeredBy || '담당자');
       } else {
         setMovementType('TRANSFER');
         setDate(new Date().toISOString().split('T')[0]);
@@ -103,7 +101,6 @@ export const MovementModal: React.FC<MovementModalProps> = ({
         setItems([{ productId: 'smart_top', quantity: '10' }]);
         setDescription('');
         setPartnerOrRecipient('');
-        setRegisteredBy('');
       }
     }
   }, [initialMovement, isOpen, sheetWebhookUrl]);
@@ -201,7 +198,7 @@ export const MovementModal: React.FC<MovementModalProps> = ({
           movementType === 'OUT'
             ? partnerOrRecipient
             : initialMovement?.partnerOrRecipient || '',
-        registeredBy: registeredBy.trim() || '담당자',
+        registeredBy: initialMovement?.registeredBy,
       };
       const sourceMovementIds = initialMovement?.sourceMovementIds || [];
       const ok =
@@ -315,31 +312,15 @@ export const MovementModal: React.FC<MovementModalProps> = ({
             </div>
           </div>
 
-          {/* Date & Registrant */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">변동 일자</label>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold outline-none focus:border-blue-500"
-                required
-              />
-            </div>
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">
-                등록 담당자 <span className="text-slate-400 font-normal">(직접 입력)</span>
-              </label>
-              <input
-                type="text"
-                value={registeredBy}
-                onChange={(e) => setRegisteredBy(e.target.value)}
-                placeholder="예: 홍길동"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold outline-none focus:border-blue-500"
-                required
-              />
-            </div>
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">변동 일자</label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold outline-none focus:border-blue-500"
+              required
+            />
           </div>
 
           {/* Location Selector */}
@@ -381,25 +362,41 @@ export const MovementModal: React.FC<MovementModalProps> = ({
               </div>
             </div>
           ) : (
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">
-                {movementType === 'IN'
-                  ? '입고 대상 거점'
-                  : movementType === 'ADJUSTMENT'
-                    ? '보정 대상 거점'
-                    : '출고 대상 거점'}
-              </label>
-              <select
-                value={singleLocation}
-                onChange={(e) => setSingleLocation(e.target.value as LocationId)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold outline-none"
-              >
-                {LOCATIONS.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name}
-                  </option>
-                ))}
-              </select>
+            <div className="space-y-3">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  {movementType === 'IN'
+                    ? '입고 대상 거점'
+                    : movementType === 'ADJUSTMENT'
+                      ? '보정 대상 거점'
+                      : '출고 대상 거점'}
+                </label>
+                <select
+                  value={singleLocation}
+                  onChange={(e) => setSingleLocation(e.target.value as LocationId)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold outline-none"
+                >
+                  {LOCATIONS.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {movementType === 'OUT' && (
+                <div className="p-3.5 bg-rose-50/50 rounded-2xl border border-rose-100 space-y-1 animate-in fade-in duration-150">
+                  <label className="block font-bold text-slate-700 mb-1">
+                    납품처 <span className="text-slate-400 font-normal">(고객사 / 수신처)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={partnerOrRecipient}
+                    onChange={(e) => setPartnerOrRecipient(e.target.value)}
+                    placeholder="예: 삼성전자(평택), 영덕군청, 여수엑스포, 청양산림항공관리소"
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-800 outline-none focus:border-rose-500"
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -472,36 +469,17 @@ export const MovementModal: React.FC<MovementModalProps> = ({
             </div>
           </div>
 
-          {/* Description & Conditional Partner */}
-          <div className="space-y-3">
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">
-                내역
-              </label>
-              <input
-                type="text"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="예: 세일정밀 스마트 상단 10, 하단 10 입고 이동 / 정기 재고 보정"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 outline-none focus:border-blue-500"
-              />
-            </div>
-
-            {/* Only show partner/recipient when OUT (납품 출고) */}
-            {movementType === 'OUT' && (
-              <div className="p-3.5 bg-rose-50/50 rounded-2xl border border-rose-100 space-y-1 animate-in fade-in duration-150">
-                <label className="block font-bold text-slate-700 mb-1">
-                  납품처 <span className="text-slate-400 font-normal">(고객사 / 수신처)</span>
-                </label>
-                <input
-                  type="text"
-                  value={partnerOrRecipient}
-                  onChange={(e) => setPartnerOrRecipient(e.target.value)}
-                  placeholder="예: 삼성전자(평택), 영덕군청, 여수엑스포, 청양산림항공관리소"
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-800 outline-none focus:border-rose-500"
-                />
-              </div>
-            )}
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">
+              내역
+            </label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="예: 세일정밀 스마트 상단 10, 하단 10 입고 이동 / 정기 재고 보정"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 outline-none focus:border-blue-500"
+            />
           </div>
 
           {/* Modal Footer */}

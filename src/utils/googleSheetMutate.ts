@@ -139,7 +139,8 @@ function planLedgerAppend(
   typeLabel: string,
   desc: string,
   items: Array<{ productId: ProductId; quantity: number; signedQuantity?: number }>,
-  sign: number
+  sign: number,
+  partner?: string
 ): SheetAppend | null {
   if (!locationId) return null;
   const sheetName = locationSheetName(workbook, locationId);
@@ -157,6 +158,7 @@ function planLedgerAppend(
   );
   const descHit = header.findIndex((c) => /내역|내용|설명|description/i.test(c));
   const descCol = descHit >= 0 ? descHit : 2;
+  const partnerCol = header.findIndex((c) => /납품|거래|상대|partner/i.test(c));
   const productCols = productColMap(header);
   const appendRow = lastFilledExcelRow(rows, dateCol, headerIndex + 1) + 1;
   return {
@@ -172,7 +174,9 @@ function planLedgerAppend(
       typeLabel,
       desc,
       items,
-      sign
+      sign,
+      partnerCol,
+      partner
     ),
   };
 }
@@ -472,7 +476,14 @@ export function planSheetWrites(
   workbook: XLSX.WorkBook,
   movement: Pick<
     StockMovement,
-    'date' | 'type' | 'locationId' | 'fromLocation' | 'toLocation' | 'description' | 'items'
+    | 'date'
+    | 'type'
+    | 'locationId'
+    | 'fromLocation'
+    | 'toLocation'
+    | 'description'
+    | 'partnerOrRecipient'
+    | 'items'
   >,
   stocks: LocationStock[]
 ): SheetWritePlan {
@@ -483,6 +494,7 @@ export function planSheetWrites(
   }));
   const desc = movement.description || '';
   const date = movement.date || '';
+  const partner = movement.partnerOrRecipient || '';
   const appends: SheetAppend[] = [];
 
   if (movement.type === 'TRANSFER') {
@@ -493,9 +505,10 @@ export function planSheetWrites(
       '출고',
       desc,
       items,
-      -1
+      -1,
+      partner
     );
-    const inRow = planLedgerAppend(workbook, movement.toLocation, date, '입고', desc, items, 1);
+    const inRow = planLedgerAppend(workbook, movement.toLocation, date, '입고', desc, items, 1, partner);
     if (outRow) appends.push(outRow);
     if (inRow) appends.push(inRow);
   } else {
@@ -511,7 +524,8 @@ export function planSheetWrites(
           : '출고',
       desc,
       items,
-      movement.type === 'OUT' ? -1 : 1
+      movement.type === 'OUT' ? -1 : 1,
+      partner
     );
     if (append) appends.push(append);
   }

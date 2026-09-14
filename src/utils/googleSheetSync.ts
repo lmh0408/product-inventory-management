@@ -190,7 +190,9 @@ export function findHeaderRow(rows: unknown[][], kind: 'dashboard' | 'movement')
     } else {
       const dateHit = cells.some((c) => /일자|날짜|date/i.test(c));
       const typeHit = cells.some((c) => /구분|유형|입출고|type/i.test(c));
-      if (dateHit && typeHit) return i;
+      const descHit = cells.some((c) => /내역|내용|설명|description/i.test(c));
+      const partnerHit = cells.some((c) => /납품|거래|상대|partner/i.test(c));
+      if ((dateHit && typeHit) || (typeHit && (descHit || partnerHit))) return i;
     }
   }
   return -1;
