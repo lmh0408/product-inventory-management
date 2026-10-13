@@ -28,8 +28,15 @@ function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
+function setNoStoreHeaders(res: ServerResponse) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+}
+
 function writeJson(res: ServerResponse, result: JsonHttpResult) {
   res.statusCode = result.status;
+  setNoStoreHeaders(res);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(result.json));
 }
@@ -37,6 +44,7 @@ function writeJson(res: ServerResponse, result: JsonHttpResult) {
 function writeProxyResult(res: ServerResponse, result: JsonHttpResult | BinaryHttpResult) {
   if ('buffer' in result) {
     res.statusCode = result.status;
+    setNoStoreHeaders(res);
     res.setHeader('Content-Type', result.contentType);
     res.end(result.buffer);
     return;

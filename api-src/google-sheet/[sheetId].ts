@@ -10,6 +10,10 @@ export default async function handler(
   const fromPath = (req.url || '').split('?')[0].split('/').filter(Boolean).pop() || '';
   const sheetId = decodeURIComponent(fromQuery || fromPath);
 
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   try {
     const result = await handleGoogleSheetExport(sheetId);
     if ('buffer' in result) {

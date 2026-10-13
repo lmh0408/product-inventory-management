@@ -562,16 +562,22 @@ export const INITIAL_THRESHOLDS: ThresholdRule[] = [
 
 export const INITIAL_THRESHOLD_RULES = INITIAL_THRESHOLDS;
 
+export const PREVIOUS_DEFAULT_SHEET_IDS = [
+  '1aZd1tuP7VQgOj5eixA74ip-xS47b8mumF5iBW_nHbdc',
+  '1ikMtbwnhzVf8ODTCrWUxQSBC9HFF5ec4F_V6wlyrjYU',
+  '1U8jPNBT-QXM3g46mjZgNXZYLNVI9cfRpn7VPx2bGlII',
+];
+
 export const INITIAL_SHEET_CONFIG: SheetConfig = {
-  sheetId: '1U8jPNBT-QXM3g46mjZgNXZYLNVI9cfRpn7VPx2bGlII',
+  sheetId: '1cenXoa-RZoU_P_CYXkgPJ5N5E9QGeDMCyBRXDa4Jp00',
   sheetUrl:
-    'https://docs.google.com/spreadsheets/d/1U8jPNBT-QXM3g46mjZgNXZYLNVI9cfRpn7VPx2bGlII/edit',
+    'https://docs.google.com/spreadsheets/d/1cenXoa-RZoU_P_CYXkgPJ5N5E9QGeDMCyBRXDa4Jp00/edit',
   sheetName: 'Dashboard',
   webhookUrl:
     'https://script.google.com/macros/s/AKfycbzFaDOU0CLx6jQHdoR0XK5GPDzPH5_9S8cYojHZDRvcg5FxH9uQPQeSj_T7gRTjgdgJeA/exec',
   lastSyncedAt: null,
   lastSavedAt: null,
-  autoSyncIntervalMinutes: 0,
+  autoSyncIntervalMinutes: 1,
   isSyncing: false,
   syncMode: 'TWO_WAY',
   lastError: null,

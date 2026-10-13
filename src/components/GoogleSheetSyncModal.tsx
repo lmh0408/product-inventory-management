@@ -88,8 +88,7 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
               <div>
                 <p className="font-extrabold text-amber-900 text-sm">시트가 아직 연결되지 않았습니다</p>
                 <p className="text-amber-800 mt-0.5 leading-relaxed">
-                  시트 URL을 붙여넣고, 공유를 링크가 있는 모든 사용자(뷰어)로 열어 주세요. 다시 맞출 때는 데이터
-                  관리의 불러오기를 사용합니다.
+                  시트 URL을 붙여넣고, 공유를 링크가 있는 모든 사용자(뷰어)로 열어 주세요.
                 </p>
               </div>
             </div>
@@ -104,17 +103,6 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
           <section className="space-y-2.5">
             <div className="flex items-center justify-between gap-2">
               <h4 className="font-extrabold text-slate-900 text-sm">1. 시트 연결</h4>
-              {canOpenSheet && (
-                <a
-                  href={toSheetUrl(parsedId || config.sheetId)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-800"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  시트 열기
-                </a>
-              )}
             </div>
             <label className="block font-bold text-slate-700" htmlFor="input-sheet-url-or-id">
               구글 스프레드시트 URL
@@ -127,22 +115,10 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
               placeholder="https://docs.google.com/spreadsheets/d/……/edit"
               className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-slate-800 font-medium font-mono outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             />
-            <p className="text-[11px] text-slate-500 leading-relaxed">
-              주소창 URL을 그대로 붙이면 됩니다. 앱이 이 시트를 읽고 씁니다.
-            </p>
-            {parsedId && (
-              <p className="text-[11px] text-slate-400 font-mono break-all">시트 ID: {parsedId}</p>
-            )}
           </section>
 
           <section className="space-y-2.5 pt-1 border-t border-slate-100">
             <h4 className="font-extrabold text-slate-900 text-sm pt-3">2. 저장 연결</h4>
-            <p className="text-[11px] text-slate-500 leading-relaxed">
-              앱에서 저장이 시트에 남으려면 웹앱을 한 번 배포해야 합니다. 시트 소유 계정이 다르면 시트 안의
-              [확장 프로그램 → Apps Script]는 “파일을 열 수 없습니다”가 납니다. 그때는
-              script.google.com 에서 새 프로젝트를 만들고 코드를 붙여넣으세요. 배포 → 웹 앱(실행: 나,
-              액세스: 모든 사용자)에서 나온 URL을 넣습니다.
-            </p>
             <CopyAppsScriptButton />
             <label className="block font-bold text-slate-700" htmlFor="input-sheet-webhook-url">
               저장용 웹앱 URL
@@ -158,10 +134,7 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
           </section>
 
           <section className="space-y-2.5 pt-1 border-t border-slate-100">
-            <h4 className="font-extrabold text-slate-900 text-sm pt-3">3. 자동 불러오기</h4>
-            <p className="text-[11px] text-slate-500 leading-relaxed">
-              평소에는 꺼 두는 것이 안전합니다. 켜면 시트를 기준으로 앱을 주기적으로 덮어씁니다.
-            </p>
+            <h4 className="font-extrabold text-slate-900 text-sm pt-3">3. 자동 불러오기 (실시간 동기화)</h4>
             <label className="sr-only" htmlFor="select-auto-sync-interval">
               자동 불러오기 주기
             </label>
@@ -173,10 +146,10 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
               }
               className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-3.5 py-2.5 text-slate-800 font-bold outline-none focus:border-blue-500"
             >
-              <option value={0}>사용 안 함 (권장)</option>
-              <option value={1}>1분마다</option>
+              <option value={1}>1분(60초)마다 자동 동기화 (권장)</option>
               <option value={5}>5분마다</option>
               <option value={15}>15분마다</option>
+              <option value={0}>사용 안 함</option>
             </select>
           </section>
         </div>

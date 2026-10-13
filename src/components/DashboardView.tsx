@@ -32,11 +32,13 @@ interface DashboardViewProps {
   onOpenPOModal?: () => void;
   onQuickTransfer?: (from: LocationId, to: LocationId, productId: ProductId) => void;
   onUpdateRemarks?: (locationId: LocationId, remarks: string) => Promise<boolean>;
+  onEditingRemarkChange?: (isEditing: boolean) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   stocks,
   onUpdateRemarks,
+  onEditingRemarkChange,
 }) => {
   const [mobileSelectedLocId, setMobileSelectedLocId] = useState<LocationId>('lucciem');
   const [editingRemarkLocation, setEditingRemarkLocation] = useState<LocationId | null>(null);
@@ -58,6 +60,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const beginRemarkEdit = (locationId: LocationId) => {
     setEditingRemarkLocation(locationId);
+    onEditingRemarkChange?.(true);
     setRemarkDraft(stocks.find((stock) => stock.locationId === locationId)?.remarks || '');
     setRemarkError(null);
   };
@@ -73,6 +76,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         return;
       }
       setEditingRemarkLocation(null);
+      onEditingRemarkChange?.(false);
     } finally {
       setIsSavingRemark(false);
     }
@@ -171,9 +175,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   실시간 연동
                 </span>
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                구글 스프레드시트 활성 원장 4개의 [현 재고] 값을 우선 반영한 매트릭스
-              </p>
             </div>
           </div>
         </div>
@@ -333,7 +334,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             <button
                               type="button"
                               disabled={isSavingRemark}
-                              onClick={() => setEditingRemarkLocation(null)}
+                              onClick={() => {
+                                setEditingRemarkLocation(null);
+                                onEditingRemarkChange?.(false);
+                              }}
                               className="rounded-lg px-3 py-1.5 font-bold text-slate-500 hover:bg-slate-100"
                             >
                               취소

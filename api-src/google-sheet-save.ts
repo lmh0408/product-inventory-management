@@ -18,6 +18,10 @@ function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
 }
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   if (req.method !== 'POST') {
     res.statusCode = 405;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');

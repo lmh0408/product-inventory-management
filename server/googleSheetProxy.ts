@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import type { LocationId, LocationStock, ProductId, StockMovement } from '../src/types';
 import {
   planDashboardRemarkUpdate,
   planFullPersist,
@@ -7,8 +8,108 @@ import {
   quoteA1SheetName,
   type SheetLedgerReplacement,
 } from '../src/utils/googleSheetMutate';
+import { parseGoogleWorkbook } from '../src/utils/googleSheetSync';
+import { applyMovementToStocks } from '../src/utils/stockUtils';
 
 export const SHEET_ID_PATTERN = /^[a-zA-Z0-9-_]{20,}$/;
+
+const sheetWriteLocks = new Map<string, Promise<unknown>>();
+
+function withSheetWriteLock<T>(sheetId: string, task: () => Promise<T>): Promise<T> {
+  const key = sheetId || '__default__';
+  const previous = sheetWriteLocks.get(key) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(task);
+  sheetWriteLocks.set(
+    key,
+    next.finally(() => {
+      if (sheetWriteLocks.get(key) === next) {
+        sheetWriteLocks.delete(key);
+      }
+    })
+  );
+  return next;
+}
+
+function undoMovementOnStocks(
+  currentStocks: LocationStock[],
+  movement: StockMovement
+): LocationStock[] {
+  const next = JSON.parse(JSON.stringify(currentStocks)) as LocationStock[];
+  const adjust = (locationId: LocationId | undefined, productId: ProductId, delta: number) => {
+    const stock = next.find((item) => item.locationId === locationId);
+    if (!stock) return;
+    stock.quantities[productId] = Math.max(
+      0,
+      Number(stock.quantities[productId] || 0) + delta
+    );
+  };
+  for (const item of movement.items || []) {
+    if (typeof item.signedQuantity === 'number' && movement.type !== 'TRANSFER') {
+      adjust(
+        movement.locationId ||
+          (movement.type === 'IN' ? movement.toLocation : movement.fromLocation),
+        item.productId,
+        -item.signedQuantity
+      );
+    } else if (movement.type === 'ADJUSTMENT') {
+      adjust(movement.locationId, item.productId, -item.quantity);
+    } else if (movement.type === 'IN') {
+      adjust(movement.locationId || movement.toLocation, item.productId, -item.quantity);
+    } else if (movement.type === 'OUT') {
+      adjust(movement.locationId || movement.fromLocation, item.productId, item.quantity);
+    } else {
+      adjust(movement.fromLocation, item.productId, item.quantity);
+      adjust(movement.toLocation, item.productId, -item.quantity);
+    }
+  }
+  return next;
+}
+
+function movementItemsSignature(movement: Pick<StockMovement, 'items'>): string {
+  return (movement.items || [])
+    .map((item) => `${item.productId}:${Number(item.quantity || 0)}:${item.signedQuantity ?? ''}`)
+    .sort()
+    .join('|');
+}
+
+function matchesOriginalMovement(
+  candidate: StockMovement,
+  sourceIds: Set<string>,
+  originals: StockMovement[]
+): boolean {
+  if (sourceIds.has(candidate.id)) return true;
+  for (const orig of originals) {
+    if (orig.id === candidate.id) return true;
+    const origRows = orig.sheetRows || [];
+    const candRows = candidate.sheetRows || [];
+    if (
+      origRows.length > 0 &&
+      candRows.length > 0 &&
+      origRows.some((or) =>
+        candRows.some((cr) => cr.sheetName === or.sheetName && cr.row === or.row)
+      )
+    ) {
+      return true;
+    }
+    const origLoc = orig.locationId || orig.fromLocation || orig.toLocation;
+    const candLoc = candidate.locationId || candidate.fromLocation || candidate.toLocation;
+    if (
+      orig.date === candidate.date &&
+      orig.type === candidate.type &&
+      origLoc === candLoc &&
+      (orig.description || '').trim() === (candidate.description || '').trim() &&
+      movementItemsSignature(orig) === movementItemsSignature(candidate)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function buildFreshExportUrl(sheetId: string): string {
+  const cacheBust = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx&_t=${encodeURIComponent(cacheBust)}`;
+}
 
 export type JsonHttpResult = {
   status: number;
@@ -53,6 +154,13 @@ function explainAppsScriptResponse(text: string): string {
 export async function handleGoogleSheetSave(
   body: Record<string, unknown>
 ): Promise<JsonHttpResult> {
+  const sheetId = String(body.sheetId || '').trim();
+  return withSheetWriteLock(sheetId, () => executeGoogleSheetSave(body));
+}
+
+async function executeGoogleSheetSave(
+  body: Record<string, unknown>
+): Promise<JsonHttpResult> {
   const webhookUrl = String(body.webhookUrl || '').trim();
   const accessToken = String(body.accessToken || '').trim();
   const sheetId = String(body.sheetId || '').trim();
@@ -75,23 +183,92 @@ export async function handleGoogleSheetSave(
   let appends: unknown[] = [];
   let updates: unknown[] = [];
   let replacements: SheetLedgerReplacement[] = [];
+  let authoritativeStocks: LocationStock[] | undefined;
+  let authoritativeMovements: StockMovement[] | undefined;
   let planningError = '';
   if (
     SHEET_ID_PATTERN.test(sheetId) &&
     (Array.isArray(body.stocks) || action === 'UPDATE_DASHBOARD_REMARK')
   ) {
     try {
-      const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx`;
+      const exportUrl = buildFreshExportUrl(sheetId);
       const xlsxRes = await fetch(exportUrl, {
         redirect: 'follow',
-        headers: { 'User-Agent': 'Mozilla/5.0 SheetStockSync/1.0' },
+        cache: 'no-store',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 SheetStockSync/1.0',
+          'Cache-Control': 'no-cache, no-store, max-age=0',
+          Pragma: 'no-cache',
+        },
       });
       if (xlsxRes.ok) {
         const buffer = Buffer.from(await xlsxRes.arrayBuffer());
         const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
-        const stocks = Array.isArray(body.stocks)
+        const clientStocks = Array.isArray(body.stocks)
           ? (body.stocks as Parameters<typeof planStockPersist>[1])
           : [];
+
+        let latestSheet: ReturnType<typeof parseGoogleWorkbook> | null = null;
+        try {
+          latestSheet = parseGoogleWorkbook(workbook);
+        } catch {
+          latestSheet = null;
+        }
+
+        let effectiveStocks = latestSheet ? latestSheet.stocks : clientStocks;
+        let effectiveMovements = Array.isArray(body.movements)
+          ? (body.movements as Parameters<typeof planFullPersist>[2])
+          : [];
+
+        if (body.movement && latestSheet) {
+          const movementObj = body.movement as StockMovement;
+          effectiveStocks = applyMovementToStocks(latestSheet.stocks, {
+            ...movementObj,
+            id: movementObj.id || `MOV-${Date.now()}`,
+          });
+          authoritativeStocks = effectiveStocks;
+        } else if (
+          action === 'SYNC_APP_DATA' &&
+          latestSheet &&
+          Array.isArray(body.replacementMovements) &&
+          (Array.isArray(body.sourceMovementIds) || Array.isArray(body.originalMovements))
+        ) {
+          const sourceIds = new Set(
+            Array.isArray(body.sourceMovementIds)
+              ? body.sourceMovementIds.map((id) => String(id))
+              : []
+          );
+          const originals = Array.isArray(body.originalMovements)
+            ? (body.originalMovements as StockMovement[])
+            : [];
+          const replacementsList = body.replacementMovements as StockMovement[];
+
+          const matchedInSheet = latestSheet.movements.filter((mov) =>
+            matchesOriginalMovement(mov, sourceIds, originals)
+          );
+          const baseToUndo = matchedInSheet.length > 0 ? matchedInSheet : originals;
+
+          let recalculatedStocks = latestSheet.stocks;
+          for (const oldMov of baseToUndo) {
+            recalculatedStocks = undoMovementOnStocks(recalculatedStocks, oldMov);
+          }
+          for (const newMov of replacementsList) {
+            recalculatedStocks = applyMovementToStocks(recalculatedStocks, newMov);
+          }
+
+          const remainingMovements = latestSheet.movements.filter(
+            (mov) => !matchesOriginalMovement(mov, sourceIds, originals)
+          );
+          effectiveMovements = [...remainingMovements, ...replacementsList].sort((a, b) =>
+            `${a.date} ${a.time || ''} ${a.id}`.localeCompare(
+              `${b.date} ${b.time || ''} ${b.id}`
+            )
+          );
+          effectiveStocks = recalculatedStocks;
+          authoritativeStocks = effectiveStocks;
+          authoritativeMovements = effectiveMovements;
+        }
+
         const plan =
           action === 'UPDATE_DASHBOARD_REMARK' && remark?.locationId
             ? planDashboardRemarkUpdate(
@@ -100,20 +277,14 @@ export async function handleGoogleSheetSave(
                 String(remark.value || '')
               )
             : action === 'SYNC_APP_DATA'
-              ? planFullPersist(
-                  workbook,
-                  stocks,
-                  Array.isArray(body.movements)
-                    ? (body.movements as Parameters<typeof planFullPersist>[2])
-                    : []
-                )
+              ? planFullPersist(workbook, effectiveStocks, effectiveMovements)
               : body.movement
                 ? planSheetWrites(
                     workbook,
                     body.movement as Parameters<typeof planSheetWrites>[1],
-                    stocks
+                    effectiveStocks
                   )
-                : planStockPersist(workbook, stocks);
+                : planStockPersist(workbook, effectiveStocks);
         appends = plan.appends;
         updates = plan.updates;
         replacements =
@@ -231,16 +402,18 @@ export async function handleGoogleSheetSave(
   const response = await fetch(webhookUrl, {
     method: 'POST',
     redirect: 'follow',
+    cache: 'no-store',
     signal: AbortSignal.timeout(50_000),
     headers: {
       'Content-Type': 'text/plain;charset=utf-8',
       'User-Agent': 'Mozilla/5.0 SheetStockSync/1.0',
+      'Cache-Control': 'no-cache, no-store, max-age=0',
     },
     body: JSON.stringify({
       action,
       sheetId,
       movement: body.movement,
-      stocks: body.stocks,
+      stocks: authoritativeStocks || body.stocks,
       appends,
       updates,
       deletes,
@@ -311,6 +484,8 @@ export async function handleGoogleSheetSave(
           ({ sheetName, row }) => ({ sheetName, row })
         ),
         movementRows,
+        ...(authoritativeStocks ? { stocks: authoritativeStocks } : {}),
+        ...(authoritativeMovements ? { movements: authoritativeMovements } : {}),
       },
     };
   } catch {
@@ -349,11 +524,14 @@ export async function handleGoogleSheetExport(
     };
   }
 
-  const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx`;
+  const exportUrl = buildFreshExportUrl(sheetId);
   const response = await fetch(exportUrl, {
     redirect: 'follow',
+    cache: 'no-store',
     headers: {
       'User-Agent': 'Mozilla/5.0 SheetStockSync/1.0',
+      'Cache-Control': 'no-cache, no-store, max-age=0',
+      Pragma: 'no-cache',
     },
   });
 

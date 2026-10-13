@@ -30,6 +30,7 @@ function doPost(e) {
     } else {
       throw new Error("반영할 시트 변경사항이 없습니다. 앱의 Apps Script 코드를 최신 버전으로 다시 배포하세요.");
     }
+    SpreadsheetApp.flush();
     return json_({
       ok: true,
       version: 7,
@@ -487,7 +488,7 @@ function matchProduct_(label) {
 }
 
 function grantSheets() {
-  var ss = SpreadsheetApp.openById("1U8jPNBT-QXM3g46mjZgNXZYLNVI9cfRpn7VPx2bGlII");
+  var ss = SpreadsheetApp.openById("1cenXoa-RZoU_P_CYXkgPJ5N5E9QGeDMCyBRXDa4Jp00");
   Logger.log(ss.getName());
 }
 `;

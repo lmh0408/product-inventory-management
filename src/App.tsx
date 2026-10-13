@@ -14,6 +14,7 @@ import {
   INITIAL_THRESHOLD_RULES,
   INITIAL_PURCHASE_ORDERS,
   INITIAL_SHEET_CONFIG,
+  PREVIOUS_DEFAULT_SHEET_IDS,
   PRODUCTS,
 } from './data/initialData';
 import {
@@ -38,7 +39,6 @@ import { Header, NavTab } from './components/Header';
 import { DashboardView } from './components/DashboardView';
 import { MovementHistoryView } from './components/MovementHistoryView';
 import { AutomationRulesView } from './components/AutomationRulesView';
-import { GoogleSheetView } from './components/GoogleSheetView';
 import { MovementModal } from './components/MovementModal';
 import { AssemblyModal } from './components/AssemblyModal';
 import { GoogleSheetSyncModal } from './components/GoogleSheetSyncModal';
@@ -160,7 +160,24 @@ export default function App() {
   const [isSheetSyncModalOpen, setIsSheetSyncModalOpen] = useState(false);
   const [isPOModalOpen, setIsPOModalOpen] = useState(false);
   const [isAlertsDrawerOpen, setIsAlertsDrawerOpen] = useState(false);
+  const [isEditingRemark, setIsEditingRemark] = useState(false);
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
+
+  // Sync & Concurrency Control Refs
+  const isSyncInFlightRef = useRef(false);
+  const inFlightSyncPromiseRef = useRef<Promise<boolean> | null>(null);
+  const isMutatingRef = useRef(false);
+  const pendingSyncAfterInputRef = useRef(false);
+  const lastSyncTimestampRef = useRef<number>(0);
+
+  const isAnyInputOpen =
+    isMovementModalOpen ||
+    isAssemblyModalOpen ||
+    isSheetSyncModalOpen ||
+    isPOModalOpen ||
+    isEditingRemark;
+  const isAnyInputOpenRef = useRef(isAnyInputOpen);
+  isAnyInputOpenRef.current = isAnyInputOpen;
 
   // Persistence State
   const [stocks, setStocks] = useState<LocationStock[]>(() => {
@@ -211,6 +228,7 @@ export default function App() {
       return {
         ...INITIAL_SHEET_CONFIG,
         webhookUrl: defaultWebhookUrl,
+        autoSyncIntervalMinutes: INITIAL_SHEET_CONFIG.autoSyncIntervalMinutes || 1,
         syncMode: defaultWebhookUrl ? 'TWO_WAY' : INITIAL_SHEET_CONFIG.syncMode,
       };
     }
@@ -219,13 +237,17 @@ export default function App() {
     const savedError = parsed.lastError || null;
     const lastError =
       savedError && /이전 버전|새 버전으로 재배포/.test(savedError) ? null : savedError;
-    const previousDefaultIds = [
-      '1aZd1tuP7VQgOj5eixA74ip-xS47b8mumF5iBW_nHbdc',
-      '1ikMtbwnhzVf8ODTCrWUxQSBC9HFF5ec4F_V6wlyrjYU',
-    ];
+    const autoSyncIntervalMinutes =
+      typeof parsed.autoSyncIntervalMinutes === 'number' && parsed.autoSyncIntervalMinutes > 0
+        ? parsed.autoSyncIntervalMinutes
+        : 1;
+
+    const legacyIds = PREVIOUS_DEFAULT_SHEET_IDS.filter(
+      (id) => id !== INITIAL_SHEET_CONFIG.sheetId
+    );
     if (
-      previousDefaultIds.includes(parsed.sheetId || '') ||
-      previousDefaultIds.some((id) => parsed.sheetUrl?.includes(id))
+      legacyIds.includes(parsed.sheetId || '') ||
+      legacyIds.some((id) => parsed.sheetUrl?.includes(id))
     ) {
       return {
         ...INITIAL_SHEET_CONFIG,
@@ -233,6 +255,7 @@ export default function App() {
         sheetId: INITIAL_SHEET_CONFIG.sheetId,
         sheetUrl: INITIAL_SHEET_CONFIG.sheetUrl,
         webhookUrl,
+        autoSyncIntervalMinutes,
         syncMode: webhookUrl ? 'TWO_WAY' : parsed.syncMode || INITIAL_SHEET_CONFIG.syncMode,
         isConnected: false,
         lastError: null,
@@ -242,6 +265,7 @@ export default function App() {
       ...INITIAL_SHEET_CONFIG,
       ...parsed,
       webhookUrl,
+      autoSyncIntervalMinutes,
       syncMode: webhookUrl ? 'TWO_WAY' : parsed.syncMode || INITIAL_SHEET_CONFIG.syncMode,
       lastError,
     };
@@ -294,17 +318,102 @@ export default function App() {
     [purchaseOrders]
   );
 
+  const handleTriggerSync = useCallback(
+    async (
+      sheetIdOverride?: string,
+      options?: { force?: boolean; silent?: boolean }
+    ): Promise<boolean> => {
+      const sheetId = (
+        typeof sheetIdOverride === 'string' && sheetIdOverride.trim()
+          ? sheetIdOverride
+          : sheetConfigRef.current.sheetId || ''
+      ).trim();
+      if (!sheetId) {
+        if (!options?.silent) {
+          setSheetConfig((prev) => ({
+            ...prev,
+            isSyncing: false,
+            isConnected: false,
+            lastError: '구글 시트 URL을 먼저 입력해 주세요.',
+          }));
+          setIsSheetSyncModalOpen(true);
+        }
+        return false;
+      }
+
+      if (isMutatingRef.current && !options?.force) {
+        pendingSyncAfterInputRef.current = true;
+        return false;
+      }
+
+      if (options?.silent && isAnyInputOpenRef.current && !options?.force) {
+        pendingSyncAfterInputRef.current = true;
+        return false;
+      }
+
+      if (isSyncInFlightRef.current && inFlightSyncPromiseRef.current) {
+        return inFlightSyncPromiseRef.current;
+      }
+
+      isSyncInFlightRef.current = true;
+      lastSyncTimestampRef.current = Date.now();
+
+      setSheetConfig((prev) => ({
+        ...prev,
+        sheetId,
+        isSyncing: true,
+      }));
+
+      const syncPromise = (async (): Promise<boolean> => {
+        try {
+          const result = await importGoogleSheet(sheetId);
+          setStocks(result.stocks);
+          setMovements(sortMovementsAscending(result.movements));
+          const nowStr = new Date().toLocaleString('ko-KR');
+          lastSyncTimestampRef.current = Date.now();
+          setSheetConfig((prev) => ({
+            ...prev,
+            sheetId,
+            sheetUrl: toSheetUrl(sheetId),
+            isSyncing: false,
+            isConnected: true,
+            lastSyncedAt: nowStr,
+            lastError: null,
+            importedTabs: result.tabNames,
+            sheetName: result.dashboardSheetName || prev.sheetName,
+          }));
+          return true;
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : '시트를 불러오지 못했습니다.';
+          setSheetConfig((prev) => ({
+            ...prev,
+            sheetId,
+            isSyncing: false,
+            // 기존 데이터를 유지하고 마지막 갱신 시각과 오류 상태만 표시
+            isConnected: prev.isConnected ?? false,
+            lastError: message,
+          }));
+          return false;
+        } finally {
+          isSyncInFlightRef.current = false;
+          inFlightSyncPromiseRef.current = null;
+        }
+      })();
+
+      inFlightSyncPromiseRef.current = syncPromise;
+      return syncPromise;
+    },
+    []
+  );
+
   // Handlers
   const handleSaveMovement = async (
     newMovementData: Omit<StockMovement, 'id' | 'sheetSynced'>
   ): Promise<boolean> => {
-    const newMovement: StockMovement = {
-      ...newMovementData,
-      id: `MOV-${Date.now().toString().slice(-6)}`,
-      sheetSynced: false,
-    };
-
-    const updatedStocks = applyMovementToStocks(stocks, newMovement);
+    if (isMutatingRef.current) {
+      throw new Error('다른 변경 작업이 처리 중입니다. 잠시 후 다시 시도해 주세요.');
+    }
     const webhookUrl = sheetConfigRef.current.webhookUrl || '';
     if (!webhookUrl) {
       throw new Error(
@@ -312,12 +421,20 @@ export default function App() {
       );
     }
 
+    isMutatingRef.current = true;
     try {
+      const newMovement: StockMovement = {
+        ...newMovementData,
+        id: `MOV-${Date.now().toString().slice(-6)}`,
+        sheetSynced: false,
+      };
+
+      const optimisticStocks = applyMovementToStocks(stocks, newMovement);
       const result = await saveMovementToSheet({
         webhookUrl,
         sheetId: sheetConfigRef.current.sheetId,
         movement: newMovement,
-        stocks: updatedStocks,
+        stocks: optimisticStocks,
       });
       if (result.appendedCount < 1) {
         throw new Error('입출고 내역이 시트에 추가되지 않았습니다.');
@@ -326,51 +443,57 @@ export default function App() {
         ...ref,
         expectedDescription: newMovement.description,
       }));
+
+      setStocks(result.stocks || optimisticStocks);
+      const syncedMovements: StockMovement[] =
+        newMovement.type === 'TRANSFER'
+          ? [
+              {
+                ...newMovement,
+                id: `${newMovement.id}-OUT`,
+                type: 'OUT',
+                locationId: newMovement.fromLocation,
+                toLocation: undefined,
+                sheetRows: newMovement.sheetRows?.[0] ? [newMovement.sheetRows[0]] : [],
+                sheetSynced: true,
+              },
+              {
+                ...newMovement,
+                id: `${newMovement.id}-IN`,
+                type: 'IN',
+                locationId: newMovement.toLocation,
+                fromLocation: undefined,
+                sheetRows: newMovement.sheetRows?.[1] ? [newMovement.sheetRows[1]] : [],
+                sheetSynced: true,
+              },
+            ]
+          : [{ ...newMovement, sheetSynced: true }];
+      setMovements((prev) =>
+        sortMovementsAscending([...prev, ...syncedMovements])
+      );
+      setSheetConfig((prev) => ({
+        ...prev,
+        lastSavedAt: new Date().toLocaleString('ko-KR'),
+        lastError: null,
+      }));
+      void handleTriggerSync(undefined, { force: true, silent: true });
+      return true;
     } catch (error) {
       throw error instanceof Error
         ? error
         : new Error('시트 저장에 실패했습니다. 앱 재고는 바꾸지 않았습니다.');
+    } finally {
+      isMutatingRef.current = false;
     }
-
-    setStocks(updatedStocks);
-    const syncedMovements: StockMovement[] =
-      newMovement.type === 'TRANSFER'
-        ? [
-            {
-              ...newMovement,
-              id: `${newMovement.id}-OUT`,
-              type: 'OUT',
-              locationId: newMovement.fromLocation,
-              toLocation: undefined,
-              sheetRows: newMovement.sheetRows?.[0] ? [newMovement.sheetRows[0]] : [],
-              sheetSynced: true,
-            },
-            {
-              ...newMovement,
-              id: `${newMovement.id}-IN`,
-              type: 'IN',
-              locationId: newMovement.toLocation,
-              fromLocation: undefined,
-              sheetRows: newMovement.sheetRows?.[1] ? [newMovement.sheetRows[1]] : [],
-              sheetSynced: true,
-            },
-          ]
-        : [{ ...newMovement, sheetSynced: true }];
-    setMovements((prev) =>
-      sortMovementsAscending([...prev, ...syncedMovements])
-    );
-    setSheetConfig((prev) => ({
-      ...prev,
-      lastSavedAt: new Date().toLocaleString('ko-KR'),
-      lastError: null,
-    }));
-    return true;
   };
 
   const handleUpdateMovement = async (
     sourceMovementIds: string[],
     movementData: Omit<StockMovement, 'id' | 'sheetSynced'>
   ): Promise<boolean> => {
+    if (isMutatingRef.current) {
+      throw new Error('다른 변경 작업이 처리 중입니다. 잠시 후 다시 시도해 주세요.');
+    }
     const originals = movements.filter((movement) =>
       sourceMovementIds.includes(movement.id)
     );
@@ -378,89 +501,99 @@ export default function App() {
       throw new Error('수정할 원본 내역을 찾지 못했습니다. 시트를 다시 불러와 주세요.');
     }
 
-    const rootId =
-      originals[0]?.id.replace(/-(OUT|IN)$/, '') ||
-      `MOV-${Date.now().toString().slice(-6)}`;
-    let revertedStocks = stocks;
-    for (const original of originals) {
-      revertedStocks = undoMovementFromStocks(revertedStocks, original);
-    }
-    const logicalMovement: StockMovement = {
-      ...movementData,
-      id: rootId,
-      sheetSynced: false,
-    };
-    const updatedStocks = applyMovementToStocks(revertedStocks, logicalMovement);
-
-    const replacementMovements: StockMovement[] =
-      movementData.type === 'TRANSFER'
-        ? [
-            {
-              ...movementData,
-              id:
-                originals.find((movement) => movement.type === 'OUT')?.id ||
-                `${rootId}-OUT`,
-              type: 'OUT',
-              locationId: movementData.fromLocation,
-              toLocation: undefined,
-              sheetSynced: false,
-              sheetRows: [],
-            },
-            {
-              ...movementData,
-              id:
-                originals.find((movement) => movement.type === 'IN')?.id ||
-                `${rootId}-IN`,
-              type: 'IN',
-              locationId: movementData.toLocation,
-              fromLocation: undefined,
-              sheetSynced: false,
-              sheetRows: [],
-            },
-          ]
-        : [
-            {
-              ...movementData,
-              id:
-                originals.find((movement) => movement.type === movementData.type)?.id ||
-                `${rootId}-${movementData.type}`,
-              sheetSynced: false,
-              sheetRows: [],
-            },
-          ];
-    const nextMovements = sortMovementsAscending([
-      ...movements.filter((movement) => !sourceMovementIds.includes(movement.id)),
-      ...replacementMovements,
-    ]);
-
+    isMutatingRef.current = true;
     try {
+      const rootId =
+        originals[0]?.id.replace(/-(OUT|IN)$/, '') ||
+        `MOV-${Date.now().toString().slice(-6)}`;
+      let revertedStocks = stocks;
+      for (const original of originals) {
+        revertedStocks = undoMovementFromStocks(revertedStocks, original);
+      }
+      const logicalMovement: StockMovement = {
+        ...movementData,
+        id: rootId,
+        sheetSynced: false,
+      };
+      const updatedStocks = applyMovementToStocks(revertedStocks, logicalMovement);
+
+      const replacementMovements: StockMovement[] =
+        movementData.type === 'TRANSFER'
+          ? [
+              {
+                ...movementData,
+                id:
+                  originals.find((movement) => movement.type === 'OUT')?.id ||
+                  `${rootId}-OUT`,
+                type: 'OUT',
+                locationId: movementData.fromLocation,
+                toLocation: undefined,
+                sheetSynced: false,
+                sheetRows: [],
+              },
+              {
+                ...movementData,
+                id:
+                  originals.find((movement) => movement.type === 'IN')?.id ||
+                  `${rootId}-IN`,
+                type: 'IN',
+                locationId: movementData.toLocation,
+                fromLocation: undefined,
+                sheetSynced: false,
+                sheetRows: [],
+              },
+            ]
+          : [
+              {
+                ...movementData,
+                id:
+                  originals.find((movement) => movement.type === movementData.type)?.id ||
+                  `${rootId}-${movementData.type}`,
+                sheetSynced: false,
+                sheetRows: [],
+              },
+            ];
+      const nextMovements = sortMovementsAscending([
+        ...movements.filter((movement) => !sourceMovementIds.includes(movement.id)),
+        ...replacementMovements,
+      ]);
+
       const result = await saveAppDataToSheet({
         webhookUrl: sheetConfigRef.current.webhookUrl || '',
         sheetId: sheetConfigRef.current.sheetId,
         stocks: updatedStocks,
         movements: nextMovements,
+        sourceMovementIds,
+        originalMovements: originals,
+        replacementMovements,
       });
-      const syncedMovements = nextMovements.map((movement) => ({
+      const baseMovements = result.movements || nextMovements;
+      const syncedMovements = baseMovements.map((movement) => ({
         ...movement,
         sheetSynced: true,
-        sheetRows: (result.movementRows?.[movement.id] || []).map((ref) => ({
-          ...ref,
-          expectedDescription: movement.description,
-        })),
+        sheetRows: (result.movementRows?.[movement.id] || movement.sheetRows || []).map(
+          (ref) => ({
+            ...ref,
+            expectedDescription: movement.description,
+          })
+        ),
       }));
-      setStocks(updatedStocks);
+      setStocks(result.stocks || updatedStocks);
       setMovements(syncedMovements);
       setSheetConfig((prev) => ({
         ...prev,
         lastSavedAt: new Date().toLocaleString('ko-KR'),
         lastError: null,
       }));
+      void handleTriggerSync(undefined, { force: true, silent: true });
       return true;
     } catch (error) {
       const message =
         error instanceof Error ? error.message : '수정 내역을 시트에 저장하지 못했습니다.';
       setSheetConfig((prev) => ({ ...prev, lastError: message }));
       throw new Error(message);
+    } finally {
+      isMutatingRef.current = false;
     }
   };
 
@@ -468,6 +601,8 @@ export default function App() {
     locationId: LocationId,
     remarks: string
   ): Promise<boolean> => {
+    if (isMutatingRef.current) return false;
+    isMutatingRef.current = true;
     try {
       const result = await saveDashboardRemark({
         webhookUrl: sheetConfigRef.current.webhookUrl || '',
@@ -488,16 +623,20 @@ export default function App() {
         lastSavedAt: new Date().toLocaleString('ko-KR'),
         lastError: null,
       }));
+      void handleTriggerSync(undefined, { force: true, silent: true });
       return true;
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Dashboard 비고 저장에 실패했습니다.';
       setSheetConfig((prev) => ({ ...prev, lastError: message }));
       return false;
+    } finally {
+      isMutatingRef.current = false;
     }
   };
 
   const handlePersistAppToSheet = async (): Promise<boolean> => {
+    if (isMutatingRef.current) return false;
     const webhookUrl = normalizeAppsScriptWebhook(sheetConfigRef.current.webhookUrl || '');
     sheetConfigRef.current = { ...sheetConfigRef.current, webhookUrl };
     setSheetConfig((prev) => ({ ...prev, webhookUrl }));
@@ -509,6 +648,7 @@ export default function App() {
       }));
       return false;
     }
+    isMutatingRef.current = true;
     try {
       const result = await saveAppDataToSheet({
         webhookUrl,
@@ -533,6 +673,7 @@ export default function App() {
         lastSavedAt: new Date().toLocaleString('ko-KR'),
         lastError: null,
       }));
+      void handleTriggerSync(undefined, { force: true, silent: true });
       return true;
     } catch (error) {
       setSheetConfig((prev) => ({
@@ -540,6 +681,8 @@ export default function App() {
         lastError: error instanceof Error ? error.message : '시트 저장에 실패했습니다.',
       }));
       return false;
+    } finally {
+      isMutatingRef.current = false;
     }
   };
 
@@ -547,6 +690,9 @@ export default function App() {
     movementIds: string[]
   ): Promise<{ ok: boolean; error?: string }> => {
     if (movementIds.length === 0) return { ok: false, error: '삭제할 내역을 선택해 주세요.' };
+    if (isMutatingRef.current) {
+      return { ok: false, error: '다른 변경 작업이 처리 중입니다. 잠시 후 다시 시도해 주세요.' };
+    }
     const defaultSheetNames: Record<LocationId, string> = {
       lucciem: '루씨엠',
       seil: '세일정밀공업',
@@ -579,6 +725,7 @@ export default function App() {
           ],
         };
       });
+    isMutatingRef.current = true;
     try {
       const result = await deleteMovementsFromSheet({
         webhookUrl: sheetConfigRef.current.webhookUrl || '',
@@ -600,6 +747,7 @@ export default function App() {
         lastSavedAt: new Date().toLocaleString('ko-KR'),
         lastError: null,
       }));
+      void handleTriggerSync(undefined, { force: true, silent: true });
       return { ok: true };
     } catch (error) {
       const message =
@@ -609,6 +757,8 @@ export default function App() {
         lastError: message,
       }));
       return { ok: false, error: message };
+    } finally {
+      isMutatingRef.current = false;
     }
   };
 
@@ -619,6 +769,7 @@ export default function App() {
     consumeTerminalBoard: boolean,
     notes?: string
   ): Promise<boolean> => {
+    if (isMutatingRef.current) return false;
     const { updatedStocks, createdMovement } = performAssemblyConversion(
       stocks,
       locationId,
@@ -627,6 +778,7 @@ export default function App() {
       consumeTerminalBoard,
       notes
     );
+    isMutatingRef.current = true;
     try {
       const result = await saveMovementToSheet({
         webhookUrl: sheetConfigRef.current.webhookUrl || '',
@@ -637,17 +789,17 @@ export default function App() {
       if (result.appendedCount < 1) {
         throw new Error('조립 내역이 시트에 추가되지 않았습니다.');
       }
-      setStocks(updatedStocks);
+      setStocks(result.stocks || updatedStocks);
       setMovements((prev) =>
         sortMovementsAscending([
           ...prev,
           {
-          ...createdMovement,
-          sheetRows: result.appends?.map((ref) => ({
-            ...ref,
-            expectedDescription: createdMovement.description,
-          })),
-          sheetSynced: true,
+            ...createdMovement,
+            sheetRows: result.appends?.map((ref) => ({
+              ...ref,
+              expectedDescription: createdMovement.description,
+            })),
+            sheetSynced: true,
           },
         ])
       );
@@ -656,6 +808,7 @@ export default function App() {
         lastSavedAt: new Date().toLocaleString('ko-KR'),
         lastError: null,
       }));
+      void handleTriggerSync(undefined, { force: true, silent: true });
       return true;
     } catch (error) {
       setSheetConfig((prev) => ({
@@ -664,6 +817,8 @@ export default function App() {
           error instanceof Error ? error.message : '조립 내역을 시트에 저장하지 못했습니다.',
       }));
       return false;
+    } finally {
+      isMutatingRef.current = false;
     }
   };
 
@@ -772,92 +927,106 @@ export default function App() {
     setIsPOModalOpen(true);
   };
 
-  const handleTriggerSync = useCallback(async (sheetIdOverride?: string): Promise<boolean> => {
-    const sheetId = (
-      typeof sheetIdOverride === 'string' && sheetIdOverride.trim()
-        ? sheetIdOverride
-        : sheetConfigRef.current.sheetId || ''
-    ).trim();
-    if (!sheetId) {
-      setSheetConfig((prev) => ({
-        ...prev,
-        isSyncing: false,
-        isConnected: false,
-        lastError: '구글 시트 URL을 먼저 입력해 주세요.',
-      }));
-      setIsSheetSyncModalOpen(true);
-      return false;
-    }
-
-    setSheetConfig((prev) => ({
-      ...prev,
-      sheetId,
-      isSyncing: true,
-      lastError: null,
-    }));
-
-    try {
-      const result = await importGoogleSheet(sheetId);
-      setStocks(result.stocks);
-      setMovements(sortMovementsAscending(result.movements));
-      setSheetConfig((prev) => ({
-        ...prev,
-        sheetId,
-        sheetUrl: toSheetUrl(sheetId),
-        isSyncing: false,
-        isConnected: true,
-        lastSyncedAt: new Date().toLocaleString('ko-KR'),
-        lastError: null,
-        importedTabs: result.tabNames,
-        sheetName: result.dashboardSheetName || prev.sheetName,
-      }));
-      return true;
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : '시트를 불러오지 못했습니다.';
-      setSheetConfig((prev) => ({
-        ...prev,
-        sheetId,
-        isSyncing: false,
-        isConnected: false,
-        lastError: message,
-      }));
-      return false;
-    }
-  }, []);
-
   const handleRequestLoadFromSheet = useCallback(
     async (sheetIdOverride?: string): Promise<boolean> => {
-      if (sheetConfigRef.current.isConnected) {
-        const confirmed = window.confirm(
-          '시트를 기준으로 앱을 덮어씁니다.\n시트에 아직 안 남은 앱 입력은 사라질 수 있습니다. 불러올까요?'
-        );
-        if (!confirmed) return false;
-      }
-      return handleTriggerSync(typeof sheetIdOverride === 'string' ? sheetIdOverride : undefined);
+      return handleTriggerSync(
+        typeof sheetIdOverride === 'string' ? sheetIdOverride : undefined,
+        { force: true, silent: false }
+      );
     },
     [handleTriggerSync]
   );
 
+  // 모달이 닫혔을 때 보류된 동기화가 있거나 입력 모달 종료 직후 최신 데이터 조회
+  const prevInputOpenRef = useRef(isAnyInputOpen);
   useEffect(() => {
-    if (!sheetConfig.isConnected || !sheetConfig.sheetId || sheetConfig.autoSyncIntervalMinutes <= 0) {
+    const wasOpen = prevInputOpenRef.current;
+    prevInputOpenRef.current = isAnyInputOpen;
+    if (wasOpen && !isAnyInputOpen && sheetConfigRef.current.sheetId) {
+      if (pendingSyncAfterInputRef.current || !isMutatingRef.current) {
+        pendingSyncAfterInputRef.current = false;
+        void handleTriggerSync(undefined, { silent: true });
+      }
+    }
+  }, [isAnyInputOpen, handleTriggerSync]);
+
+  // ① 주기적 백그라운드 자동 동기화 (브라우저 탭이 보이는 상태에서만 기본 60초 간격 조회)
+  useEffect(() => {
+    const intervalMinutes = sheetConfig.autoSyncIntervalMinutes;
+    if (!sheetConfig.sheetId || intervalMinutes <= 0) {
       return;
     }
+    const intervalMs = Math.max(1, intervalMinutes) * 60 * 1000;
     const timer = window.setInterval(() => {
-      void handleTriggerSync();
-    }, sheetConfig.autoSyncIntervalMinutes * 60 * 1000);
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+      if (isAnyInputOpenRef.current || isMutatingRef.current) {
+        pendingSyncAfterInputRef.current = true;
+        return;
+      }
+      void handleTriggerSync(undefined, { silent: true });
+    }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [
-    sheetConfig.isConnected,
-    sheetConfig.sheetId,
-    sheetConfig.autoSyncIntervalMinutes,
-    handleTriggerSync,
-  ]);
+  }, [sheetConfig.sheetId, sheetConfig.autoSyncIntervalMinutes, handleTriggerSync]);
 
+  // ② 브라우저 탭 복귀(visibilitychange) 및 창 포커스 복귀(focus) 시 즉시 동기화 (중복 방지)
+  useEffect(() => {
+    const MIN_EVENT_GAP_MS = 3_000;
+    const triggerOnReturn = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+      if (!sheetConfigRef.current.sheetId) return;
+      if (isAnyInputOpenRef.current || isMutatingRef.current) {
+        pendingSyncAfterInputRef.current = true;
+        return;
+      }
+      if (Date.now() - lastSyncTimestampRef.current < MIN_EVENT_GAP_MS) {
+        return;
+      }
+      void handleTriggerSync(undefined, { silent: true });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        triggerOnReturn();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      triggerOnReturn();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [handleTriggerSync]);
+
+  // 초기 시트 연결 및 시트 ID 변경 시 즉시 조회
   useEffect(() => {
     if (!sheetConfig.sheetId) return;
-    void handleTriggerSync(sheetConfig.sheetId);
+    void handleTriggerSync(sheetConfig.sheetId, { force: true, silent: true });
   }, [handleTriggerSync, sheetConfig.sheetId]);
+
+  // 대시보드 ↔ 입출고 이력 등 주요 화면 탭 전환 시 최신 데이터 조회
+  const handleSelectTab = useCallback(
+    (nextTab: NavTab) => {
+      setActiveTab(nextTab);
+      if (
+        (nextTab === 'dashboard' || nextTab === 'movements') &&
+        sheetConfigRef.current.sheetId
+      ) {
+        if (Date.now() - lastSyncTimestampRef.current >= 2_000) {
+          void handleTriggerSync(undefined, { silent: true });
+        }
+      }
+    },
+    [handleTriggerSync]
+  );
 
   const handleExportCSV = () => {
     const csvContent = exportStocksToCSV(stocks);
@@ -934,8 +1103,10 @@ export default function App() {
     >
       <Header
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleSelectTab}
         onOpenSheetSyncModal={() => setIsSheetSyncModalOpen(true)}
+        sheetConfig={sheetConfig}
+        onTriggerSync={() => void handleTriggerSync(undefined, { force: true })}
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden pt-6">
@@ -952,9 +1123,10 @@ export default function App() {
               setIsMovementModalOpen(true);
             }}
             onOpenAssemblyModal={handleOpenAssemblyModal}
-            onOpenAutomation={() => setActiveTab('automation')}
+            onOpenAutomation={() => handleSelectTab('automation')}
             onOpenPOModal={handleGenerateAutoPO}
             onUpdateRemarks={handleUpdateRemarks}
+            onEditingRemarkChange={setIsEditingRemark}
             onQuickTransfer={(from, to, prod) => {
               setEditingMovement(null);
               setIsMovementModalOpen(true);
@@ -964,7 +1136,9 @@ export default function App() {
 
         {activeTab === 'movements' && (
           <MovementHistoryView
+            stocks={stocks}
             movements={movements}
+            sheetConfig={sheetConfig}
             onOpenMovementModal={() => {
               setEditingMovement(null);
               setIsMovementModalOpen(true);
@@ -974,6 +1148,14 @@ export default function App() {
               setIsMovementModalOpen(true);
             }}
             onExportCSV={handleExportCSV}
+            onTriggerSync={handleRequestLoadFromSheet}
+            onPersistToSheet={handlePersistAppToSheet}
+            onUpdateWebhook={(url) => {
+              const webhookUrl = normalizeAppsScriptWebhook(url);
+              sheetConfigRef.current = { ...sheetConfigRef.current, webhookUrl };
+              setSheetConfig((prev) => ({ ...prev, webhookUrl, lastError: null }));
+            }}
+            onDeleteMovements={handleDeleteMovements}
           />
         )}
 
@@ -993,32 +1175,6 @@ export default function App() {
               setIsMovementModalOpen(true);
             }}
             onOpenAssemblyModal={handleOpenAssemblyModal}
-          />
-        )}
-
-        {activeTab === 'sheetsync' && (
-          <GoogleSheetView
-            stocks={stocks}
-            movements={movements}
-            sheetConfig={sheetConfig}
-            onTriggerSync={handleRequestLoadFromSheet}
-            onExportCSV={handleExportCSV}
-            onImportCSV={handleImportCSV}
-            onPersistToSheet={handlePersistAppToSheet}
-            onOpenMovementModal={() => {
-              setEditingMovement(null);
-              setIsMovementModalOpen(true);
-            }}
-            onUpdateWebhook={(url) => {
-              const webhookUrl = normalizeAppsScriptWebhook(url);
-              sheetConfigRef.current = { ...sheetConfigRef.current, webhookUrl };
-              setSheetConfig((prev) => ({ ...prev, webhookUrl, lastError: null }));
-            }}
-            onDeleteMovements={handleDeleteMovements}
-            onEditMovement={(movement) => {
-              setEditingMovement(editableMovement(movement, movements));
-              setIsMovementModalOpen(true);
-            }}
           />
         )}
       </div>

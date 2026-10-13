@@ -6,6 +6,8 @@ export interface SheetSaveResult {
   deletedCount: number;
   appends?: SheetRowReference[];
   movementRows?: Record<string, SheetRowReference[]>;
+  stocks?: LocationStock[];
+  movements?: StockMovement[];
 }
 
 export function normalizeAppsScriptWebhook(raw: string): string {
@@ -43,9 +45,14 @@ async function postSheetSave(body: Record<string, unknown>): Promise<SheetSaveRe
   const timeout = window.setTimeout(() => controller.abort(), 60_000);
   let response: Response;
   try {
-    response = await fetch('/api/google-sheet-save', {
+    response = await fetch(`/api/google-sheet-save?_t=${Date.now()}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+      },
       body: JSON.stringify({ ...body, webhookUrl }),
       signal: controller.signal,
     });
@@ -70,6 +77,8 @@ async function postSheetSave(body: Record<string, unknown>): Promise<SheetSaveRe
         deletedCount?: number;
         appends?: SheetRowReference[];
         movementRows?: Record<string, SheetRowReference[]>;
+        stocks?: LocationStock[];
+        movements?: StockMovement[];
       })
     : { ok: false, error: await response.text() };
 
@@ -82,6 +91,8 @@ async function postSheetSave(body: Record<string, unknown>): Promise<SheetSaveRe
     deletedCount: Number(parsed.deletedCount || 0),
     appends: parsed.appends,
     movementRows: parsed.movementRows,
+    stocks: parsed.stocks,
+    movements: parsed.movements,
   };
 }
 
@@ -98,6 +109,9 @@ export async function saveAppDataToSheet(params: {
   sheetId: string;
   stocks: LocationStock[];
   movements: StockMovement[];
+  sourceMovementIds?: string[];
+  originalMovements?: StockMovement[];
+  replacementMovements?: StockMovement[];
 }): Promise<SheetSaveResult> {
   return postSheetSave({
     action: 'SYNC_APP_DATA',
@@ -105,6 +119,9 @@ export async function saveAppDataToSheet(params: {
     sheetId: params.sheetId,
     stocks: stockPayload(params.stocks),
     movements: params.movements,
+    sourceMovementIds: params.sourceMovementIds,
+    originalMovements: params.originalMovements,
+    replacementMovements: params.replacementMovements,
   });
 }
 

@@ -155,11 +155,11 @@ export const GoogleSheetView: React.FC<GoogleSheetViewProps> = ({
               </span>
             )}
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              저장은 4개 원장 탭의 입출고 행만 반영합니다. Dashboard 값은 수정하지 않으며 합계
-              수식은 실제 데이터 행 범위에 맞춰 자동 조정합니다.
-              {sheetConfig.lastSavedAt ? ` · 마지막 저장 ${sheetConfig.lastSavedAt}` : ''}
-            </p>
+            {sheetConfig.lastSavedAt && (
+              <p className="text-xs text-slate-500 mt-0.5">
+                마지막 저장 {sheetConfig.lastSavedAt}
+              </p>
+            )}
           </div>
         </div>
 

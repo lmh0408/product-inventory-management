@@ -416,8 +416,23 @@ export function parseGoogleWorkbook(workbook: XLSX.WorkBook): GoogleSheetImportR
   };
 }
 
-export async function importGoogleSheet(sheetId: string): Promise<GoogleSheetImportResult> {
-  const response = await fetch(`/api/google-sheet/${encodeURIComponent(sheetId)}`);
+export async function importGoogleSheet(
+  sheetId: string,
+  signal?: AbortSignal
+): Promise<GoogleSheetImportResult> {
+  const cacheBust = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const response = await fetch(
+    `/api/google-sheet/${encodeURIComponent(sheetId)}?_t=${encodeURIComponent(cacheBust)}`,
+    {
+      method: 'GET',
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+      },
+      signal,
+    }
+  );
   if (!response.ok) {
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
