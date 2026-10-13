@@ -15,6 +15,7 @@ import {
   INITIAL_PURCHASE_ORDERS,
   INITIAL_SHEET_CONFIG,
   PREVIOUS_DEFAULT_SHEET_IDS,
+  PREVIOUS_DEFAULT_WEBHOOK_URLS,
   PRODUCTS,
 } from './data/initialData';
 import {
@@ -233,7 +234,11 @@ export default function App() {
       };
     }
     const parsed = JSON.parse(saved) as Partial<SheetConfig>;
-    const webhookUrl = String(parsed.webhookUrl || defaultWebhookUrl).trim();
+    const savedWebhookUrl = String(parsed.webhookUrl || '').trim();
+    const webhookUrl =
+      !savedWebhookUrl || PREVIOUS_DEFAULT_WEBHOOK_URLS.includes(savedWebhookUrl)
+        ? defaultWebhookUrl
+        : savedWebhookUrl;
     const savedError = parsed.lastError || null;
     const lastError =
       savedError && /이전 버전|새 버전으로 재배포/.test(savedError) ? null : savedError;

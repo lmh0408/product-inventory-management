@@ -568,13 +568,17 @@ export const PREVIOUS_DEFAULT_SHEET_IDS = [
   '1U8jPNBT-QXM3g46mjZgNXZYLNVI9cfRpn7VPx2bGlII',
 ];
 
+export const PREVIOUS_DEFAULT_WEBHOOK_URLS = [
+  'https://script.google.com/macros/s/AKfycbzFaDOU0CLx6jQHdoR0XK5GPDzPH5_9S8cYojHZDRvcg5FxH9uQPQeSj_T7gRTjgdgJeA/exec',
+];
+
 export const INITIAL_SHEET_CONFIG: SheetConfig = {
   sheetId: '1cenXoa-RZoU_P_CYXkgPJ5N5E9QGeDMCyBRXDa4Jp00',
   sheetUrl:
     'https://docs.google.com/spreadsheets/d/1cenXoa-RZoU_P_CYXkgPJ5N5E9QGeDMCyBRXDa4Jp00/edit',
   sheetName: 'Dashboard',
   webhookUrl:
-    'https://script.google.com/macros/s/AKfycbzFaDOU0CLx6jQHdoR0XK5GPDzPH5_9S8cYojHZDRvcg5FxH9uQPQeSj_T7gRTjgdgJeA/exec',
+    'https://script.google.com/macros/s/AKfycbyIYuCtvex7OScKIxZfrowY7SmMIYRGWggeYgd_28X7yOqhJ2SlMMrhbRBaEYuWIp5k/exec',
   lastSyncedAt: null,
   lastSavedAt: null,
   autoSyncIntervalMinutes: 1,
