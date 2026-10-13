@@ -17,7 +17,8 @@ await esbuild.build({
   target: 'node20',
   format: 'cjs',
   footer: {
-    js: '\nmodule.exports = module.exports.default || module.exports;',
+    js: '\nconst _h = module.exports.default || module.exports;\nmodule.exports = _h;\nmodule.exports.default = _h;',
   },
   logLevel: 'info',
 });
+

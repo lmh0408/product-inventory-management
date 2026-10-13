@@ -515,8 +515,12 @@ export function saveErrorResult(error: unknown): JsonHttpResult {
 }
 
 export async function handleGoogleSheetExport(
-  sheetId: string
+  rawSheetId: string
 ): Promise<JsonHttpResult | BinaryHttpResult> {
+  const sheetId = (
+    rawSheetId.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/i)?.[1] || rawSheetId
+  ).trim();
+
   if (!SHEET_ID_PATTERN.test(sheetId)) {
     return {
       status: 400,
@@ -528,6 +532,7 @@ export async function handleGoogleSheetExport(
   const response = await fetch(exportUrl, {
     redirect: 'follow',
     cache: 'no-store',
+    signal: AbortSignal.timeout(25_000),
     headers: {
       'User-Agent': 'Mozilla/5.0 SheetStockSync/1.0',
       'Cache-Control': 'no-cache, no-store, max-age=0',

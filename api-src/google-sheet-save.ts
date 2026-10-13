@@ -18,18 +18,20 @@ function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
 }
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-
-  if (req.method !== 'POST') {
-    res.statusCode = 405;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ok: false, error: 'POST만 지원합니다.'}));
-    return;
-  }
-
   try {
+    if (!res.headersSent) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+
+    if (req.method !== 'POST') {
+      res.statusCode = 405;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ok: false, error: 'POST만 지원합니다.'}));
+      return;
+    }
+
     const body =
       typeof (req as IncomingMessage & {body?: unknown}).body === 'object' &&
       (req as IncomingMessage & {body?: unknown}).body !== null &&
@@ -40,13 +42,17 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
           >)
         : await readJsonBody(req);
     const result = await handleGoogleSheetSave(body);
-    res.statusCode = result.status;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify(result.json));
+    if (!res.headersSent) {
+      res.statusCode = result.status;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify(result.json));
+    }
   } catch (error) {
     const result = saveErrorResult(error);
-    res.statusCode = result.status;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify(result.json));
+    if (!res.headersSent) {
+      res.statusCode = result.status;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify(result.json));
+    }
   }
 }
