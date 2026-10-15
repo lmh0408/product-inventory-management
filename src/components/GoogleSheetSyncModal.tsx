@@ -132,26 +132,6 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
               className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-slate-800 font-medium font-mono outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             />
           </section>
-
-          <section className="space-y-2.5 pt-1 border-t border-slate-100">
-            <h4 className="font-extrabold text-slate-900 text-sm pt-3">3. 자동 불러오기 (실시간 동기화)</h4>
-            <label className="sr-only" htmlFor="select-auto-sync-interval">
-              자동 불러오기 주기
-            </label>
-            <select
-              id="select-auto-sync-interval"
-              value={config.autoSyncIntervalMinutes}
-              onChange={(e) =>
-                onUpdateConfig({ autoSyncIntervalMinutes: Number(e.target.value) })
-              }
-              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-3.5 py-2.5 text-slate-800 font-bold outline-none focus:border-blue-500"
-            >
-              <option value={1}>1분(60초)마다 자동 동기화 (권장)</option>
-              <option value={5}>5분마다</option>
-              <option value={15}>15분마다</option>
-              <option value={0}>사용 안 함</option>
-            </select>
-          </section>
         </div>
 
         <div className="p-4 border-t border-slate-100 flex items-center justify-end bg-slate-50">

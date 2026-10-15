@@ -168,8 +168,6 @@ export default function App() {
   const isSyncInFlightRef = useRef(false);
   const inFlightSyncPromiseRef = useRef<Promise<boolean> | null>(null);
   const isMutatingRef = useRef(false);
-  const pendingSyncAfterInputRef = useRef(false);
-  const lastSyncTimestampRef = useRef<number>(0);
 
   const isAnyInputOpen =
     isMovementModalOpen ||
@@ -229,7 +227,6 @@ export default function App() {
       return {
         ...INITIAL_SHEET_CONFIG,
         webhookUrl: defaultWebhookUrl,
-        autoSyncIntervalMinutes: INITIAL_SHEET_CONFIG.autoSyncIntervalMinutes || 1,
         syncMode: defaultWebhookUrl ? 'TWO_WAY' : INITIAL_SHEET_CONFIG.syncMode,
       };
     }
@@ -242,10 +239,6 @@ export default function App() {
     const savedError = parsed.lastError || null;
     const lastError =
       savedError && /이전 버전|새 버전으로 재배포/.test(savedError) ? null : savedError;
-    const autoSyncIntervalMinutes =
-      typeof parsed.autoSyncIntervalMinutes === 'number' && parsed.autoSyncIntervalMinutes > 0
-        ? parsed.autoSyncIntervalMinutes
-        : 1;
 
     const legacyIds = PREVIOUS_DEFAULT_SHEET_IDS.filter(
       (id) => id !== INITIAL_SHEET_CONFIG.sheetId
@@ -260,7 +253,6 @@ export default function App() {
         sheetId: INITIAL_SHEET_CONFIG.sheetId,
         sheetUrl: INITIAL_SHEET_CONFIG.sheetUrl,
         webhookUrl,
-        autoSyncIntervalMinutes,
         syncMode: webhookUrl ? 'TWO_WAY' : parsed.syncMode || INITIAL_SHEET_CONFIG.syncMode,
         isConnected: false,
         lastError: null,
@@ -270,7 +262,6 @@ export default function App() {
       ...INITIAL_SHEET_CONFIG,
       ...parsed,
       webhookUrl,
-      autoSyncIntervalMinutes,
       syncMode: webhookUrl ? 'TWO_WAY' : parsed.syncMode || INITIAL_SHEET_CONFIG.syncMode,
       lastError,
     };
@@ -347,12 +338,10 @@ export default function App() {
       }
 
       if (isMutatingRef.current && !options?.force) {
-        pendingSyncAfterInputRef.current = true;
         return false;
       }
 
       if (options?.silent && isAnyInputOpenRef.current && !options?.force) {
-        pendingSyncAfterInputRef.current = true;
         return false;
       }
 
@@ -361,7 +350,6 @@ export default function App() {
       }
 
       isSyncInFlightRef.current = true;
-      lastSyncTimestampRef.current = Date.now();
 
       setSheetConfig((prev) => ({
         ...prev,
@@ -374,15 +362,15 @@ export default function App() {
           const result = await importGoogleSheet(sheetId);
           setStocks(result.stocks);
           setMovements(sortMovementsAscending(result.movements));
-          const nowStr = new Date().toLocaleString('ko-KR');
-          lastSyncTimestampRef.current = Date.now();
+          const now = new Date();
           setSheetConfig((prev) => ({
             ...prev,
             sheetId,
             sheetUrl: toSheetUrl(sheetId),
             isSyncing: false,
             isConnected: true,
-            lastSyncedAt: nowStr,
+            lastSyncedAt: now.toLocaleString('ko-KR'),
+            lastSyncedAtMs: now.getTime(),
             lastError: null,
             importedTabs: result.tabNames,
             sheetName: result.dashboardSheetName || prev.sheetName,
@@ -942,96 +930,15 @@ export default function App() {
     [handleTriggerSync]
   );
 
-  // 모달이 닫혔을 때 보류된 동기화가 있거나 입력 모달 종료 직후 최신 데이터 조회
-  const prevInputOpenRef = useRef(isAnyInputOpen);
-  useEffect(() => {
-    const wasOpen = prevInputOpenRef.current;
-    prevInputOpenRef.current = isAnyInputOpen;
-    if (wasOpen && !isAnyInputOpen && sheetConfigRef.current.sheetId) {
-      if (pendingSyncAfterInputRef.current || !isMutatingRef.current) {
-        pendingSyncAfterInputRef.current = false;
-        void handleTriggerSync(undefined, { silent: true });
-      }
-    }
-  }, [isAnyInputOpen, handleTriggerSync]);
-
-  // ① 주기적 백그라운드 자동 동기화 (브라우저 탭이 보이는 상태에서만 기본 60초 간격 조회)
-  useEffect(() => {
-    const intervalMinutes = sheetConfig.autoSyncIntervalMinutes;
-    if (!sheetConfig.sheetId || intervalMinutes <= 0) {
-      return;
-    }
-    const intervalMs = Math.max(1, intervalMinutes) * 60 * 1000;
-    const timer = window.setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-        return;
-      }
-      if (isAnyInputOpenRef.current || isMutatingRef.current) {
-        pendingSyncAfterInputRef.current = true;
-        return;
-      }
-      void handleTriggerSync(undefined, { silent: true });
-    }, intervalMs);
-    return () => window.clearInterval(timer);
-  }, [sheetConfig.sheetId, sheetConfig.autoSyncIntervalMinutes, handleTriggerSync]);
-
-  // ② 브라우저 탭 복귀(visibilitychange) 및 창 포커스 복귀(focus) 시 즉시 동기화 (중복 방지)
-  useEffect(() => {
-    const MIN_EVENT_GAP_MS = 3_000;
-    const triggerOnReturn = () => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-        return;
-      }
-      if (!sheetConfigRef.current.sheetId) return;
-      if (isAnyInputOpenRef.current || isMutatingRef.current) {
-        pendingSyncAfterInputRef.current = true;
-        return;
-      }
-      if (Date.now() - lastSyncTimestampRef.current < MIN_EVENT_GAP_MS) {
-        return;
-      }
-      void handleTriggerSync(undefined, { silent: true });
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        triggerOnReturn();
-      }
-    };
-
-    const handleWindowFocus = () => {
-      triggerOnReturn();
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleWindowFocus);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleWindowFocus);
-    };
-  }, [handleTriggerSync]);
-
   // 초기 시트 연결 및 시트 ID 변경 시 즉시 조회
   useEffect(() => {
     if (!sheetConfig.sheetId) return;
     void handleTriggerSync(sheetConfig.sheetId, { force: true, silent: true });
   }, [handleTriggerSync, sheetConfig.sheetId]);
 
-  // 대시보드 ↔ 입출고 이력 등 주요 화면 탭 전환 시 최신 데이터 조회
-  const handleSelectTab = useCallback(
-    (nextTab: NavTab) => {
-      setActiveTab(nextTab);
-      if (
-        (nextTab === 'dashboard' || nextTab === 'movements') &&
-        sheetConfigRef.current.sheetId
-      ) {
-        if (Date.now() - lastSyncTimestampRef.current >= 2_000) {
-          void handleTriggerSync(undefined, { silent: true });
-        }
-      }
-    },
-    [handleTriggerSync]
-  );
+  const handleSelectTab = useCallback((nextTab: NavTab) => {
+    setActiveTab(nextTab);
+  }, []);
 
   const handleExportCSV = () => {
     const csvContent = exportStocksToCSV(stocks);
@@ -1110,8 +1017,6 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={handleSelectTab}
         onOpenSheetSyncModal={() => setIsSheetSyncModalOpen(true)}
-        sheetConfig={sheetConfig}
-        onTriggerSync={() => void handleTriggerSync(undefined, { force: true })}
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden pt-6">

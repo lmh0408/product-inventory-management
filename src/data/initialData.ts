@@ -581,7 +581,6 @@ export const INITIAL_SHEET_CONFIG: SheetConfig = {
     'https://script.google.com/macros/s/AKfycbyIYuCtvex7OScKIxZfrowY7SmMIYRGWggeYgd_28X7yOqhJ2SlMMrhbRBaEYuWIp5k/exec',
   lastSyncedAt: null,
   lastSavedAt: null,
-  autoSyncIntervalMinutes: 1,
   isSyncing: false,
   syncMode: 'TWO_WAY',
   lastError: null,

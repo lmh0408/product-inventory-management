@@ -131,8 +131,8 @@ export interface SheetConfig {
   apiKey?: string;
   webhookUrl?: string;
   lastSyncedAt: string | null;
+  lastSyncedAtMs?: number;
   lastSavedAt: string | null;
-  autoSyncIntervalMinutes: number;
   isSyncing: boolean;
   syncMode: 'TWO_WAY' | 'PULL_ONLY' | 'PUSH_ONLY';
   lastError?: string | null;

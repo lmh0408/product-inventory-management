@@ -13,8 +13,12 @@ import {
   ExternalLink,
   X,
   Search,
+  Upload,
+  Download,
+  Loader2,
 } from 'lucide-react';
 import { CopyAppsScriptButton } from './CopyAppsScriptButton';
+import { ElapsedTime } from './ElapsedTime';
 import { isAppsScriptWebhook } from '../utils/googleSheetWrite';
 
 interface MovementHistoryViewProps {
@@ -120,6 +124,34 @@ export const MovementHistoryView: React.FC<MovementHistoryViewProps> = ({
   const [showToast, setShowToast] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isSavingToSheet, setIsSavingToSheet] = useState(false);
+  const [isLoadingFromSheet, setIsLoadingFromSheet] = useState(false);
+  const isSheetBusy = isSavingToSheet || isLoadingFromSheet || sheetConfig.isSyncing;
+
+  const flashToast = (message: string) => {
+    setShowToast(message);
+    setTimeout(() => setShowToast(null), 3000);
+  };
+
+  const handleSaveToSheet = async () => {
+    if (isSheetBusy) return;
+    setIsSavingToSheet(true);
+    try {
+      if (await onPersistToSheet()) flashToast('앱 데이터를 원장 시트에 저장했습니다.');
+    } finally {
+      setIsSavingToSheet(false);
+    }
+  };
+
+  const handleLoadFromSheet = async () => {
+    if (isSheetBusy) return;
+    setIsLoadingFromSheet(true);
+    try {
+      if (await onTriggerSync()) flashToast('원장 시트에서 최신 데이터를 불러왔습니다.');
+    } finally {
+      setIsLoadingFromSheet(false);
+    }
+  };
 
   const groupedMovements = groupTransfersForDisplay(movements);
 
@@ -262,6 +294,42 @@ export const MovementHistoryView: React.FC<MovementHistoryViewProps> = ({
               <span>재고 이동 / 입출고 등록</span>
             </button>
           )}
+          <button
+            id="btn-save-to-sheet"
+            type="button"
+            onClick={handleSaveToSheet}
+            disabled={isSheetBusy}
+            title="앱의 재고·입출고 내역을 원장 시트에 저장"
+            className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-2xl transition-colors shadow-xs disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {isSavingToSheet ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Upload className="w-4 h-4" />
+            )}
+            <span>저장</span>
+          </button>
+          <button
+            id="btn-load-from-sheet"
+            type="button"
+            onClick={handleLoadFromSheet}
+            disabled={isSheetBusy}
+            title="원장 시트의 최신 데이터를 앱으로 불러오기"
+            className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-2xl transition-colors shadow-xs disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {isLoadingFromSheet || sheetConfig.isSyncing ? (
+              <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
+            ) : (
+              <Download className="w-4 h-4 text-slate-500" />
+            )}
+            <span>불러오기</span>
+            {typeof sheetConfig.lastSyncedAtMs === 'number' && (
+              <ElapsedTime
+                since={sheetConfig.lastSyncedAtMs}
+                className="ml-1 pl-2 border-l border-slate-200 font-medium text-slate-400 tabular-nums"
+              />
+            )}
+          </button>
           {sheetConfig.sheetId && (
             <a
               id="btn-open-google-sheet"

@@ -5,11 +5,7 @@ import {
   ClipboardList,
   FileSpreadsheet,
   Settings,
-  RefreshCw,
-  AlertCircle,
-  CheckCircle2,
 } from 'lucide-react';
-import { SheetConfig } from '../types';
 
 export type NavTab = 'dashboard' | 'movements' | 'automation';
 
@@ -17,8 +13,6 @@ interface HeaderProps {
   activeTab: NavTab;
   setActiveTab: (tab: NavTab) => void;
   onOpenSheetSyncModal: () => void;
-  sheetConfig?: SheetConfig;
-  onTriggerSync?: () => void;
 }
 
 const NAV_ITEMS: {
@@ -53,8 +47,6 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
   onOpenSheetSyncModal,
-  sheetConfig,
-  onTriggerSync,
 }) => {
   return (
     <header
@@ -114,46 +106,6 @@ export const Header: React.FC<HeaderProps> = ({
         </nav>
 
         <div className="flex items-center justify-end gap-1.5 shrink-0">
-          {sheetConfig && (
-            <div className="hidden lg:flex items-center gap-1.5">
-              {sheetConfig.lastError ? (
-                <button
-                  type="button"
-                  onClick={onTriggerSync}
-                  title={`동기화 오류: ${sheetConfig.lastError}\n클릭하여 다시 조회`}
-                  className="w-[220px] flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold tabular-nums whitespace-nowrap hover:bg-rose-100 transition-colors"
-                >
-                  <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                  <span className="truncate">
-                    조회 오류
-                    {sheetConfig.lastSyncedAt ? ` · ${sheetConfig.lastSyncedAt}` : ''}
-                  </span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={onTriggerSync}
-                  disabled={sheetConfig.isSyncing}
-                  title="클릭하여 최신 시트 데이터 즉시 조회"
-                  className="w-[220px] flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 text-[11px] font-semibold tabular-nums whitespace-nowrap hover:bg-slate-100 transition-colors disabled:opacity-70"
-                >
-                  {sheetConfig.isSyncing ? (
-                    <RefreshCw className="w-3.5 h-3.5 text-blue-600 animate-spin shrink-0" />
-                  ) : (
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  )}
-                  <span className="truncate">
-                    {sheetConfig.isSyncing
-                      ? '동기화 중...'
-                      : sheetConfig.lastSyncedAt
-                        ? `최근 갱신 ${sheetConfig.lastSyncedAt}`
-                        : '시트 대기 중'}
-                  </span>
-                </button>
-              )}
-            </div>
-          )}
-
           <button
             id="nav-link-sheet-settings"
             type="button"
