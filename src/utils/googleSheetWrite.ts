@@ -1,4 +1,5 @@
-import { LocationStock, SheetRowReference, StockMovement } from '../types';
+import { LocationStock, MasterData, SheetRowReference, StockMovement } from '../types';
+import { buildMasterSheetStructure, masterDataToSheetRows } from './masterDataSheet';
 
 export interface SheetSaveResult {
   appendedCount: number;
@@ -167,6 +168,21 @@ export async function saveDashboardRemark(params: {
       locationId: params.locationId,
       value: params.value,
     },
+  });
+}
+
+export async function saveMasterDataToSheet(params: {
+  webhookUrl: string;
+  sheetId: string;
+  masterData: MasterData;
+  previous?: MasterData;
+}): Promise<SheetSaveResult> {
+  return postSheetSave({
+    action: 'SAVE_MASTER_DATA',
+    webhookUrl: params.webhookUrl.trim(),
+    sheetId: params.sheetId,
+    rows: masterDataToSheetRows(params.masterData),
+    structure: buildMasterSheetStructure(params.previous || params.masterData, params.masterData),
   });
 }
 

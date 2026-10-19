@@ -2,12 +2,15 @@ import * as XLSX from 'xlsx';
 import {
   LocationId,
   LocationStock,
+  MasterData,
   MovementItem,
   MovementType,
   ProductId,
   StockMovement,
 } from '../types';
 import { LOCATIONS, PRODUCTS } from '../data/initialData';
+import { applyMasterData, findLocationIdBySheetName, getLocationSheetName } from '../data/masterData';
+import { parseMasterDataSheet } from './masterDataSheet';
 
 export const ACTIVE_LEDGER_SHEET_NAMES: Record<LocationId, string> = {
   lucciem: '루씨엠-오름차순',
@@ -17,10 +20,11 @@ export const ACTIVE_LEDGER_SHEET_NAMES: Record<LocationId, string> = {
 };
 
 export function activeLedgerLocation(sheetName: string): LocationId | null {
-  const entry = (Object.entries(ACTIVE_LEDGER_SHEET_NAMES) as [LocationId, string][]).find(
-    ([, expectedName]) => expectedName === sheetName
+  return (
+    findLocationIdBySheetName(sheetName) ||
+    (Object.entries(ACTIVE_LEDGER_SHEET_NAMES).find(([, expectedName]) => expectedName === sheetName)?.[0] ??
+      null)
   );
-  return entry?.[0] || null;
 }
 
 export interface GoogleSheetImportResult {
@@ -28,6 +32,7 @@ export interface GoogleSheetImportResult {
   movements: StockMovement[];
   tabNames: string[];
   dashboardSheetName: string | null;
+  masterData?: MasterData | null;
 }
 
 export function extractSheetId(input: string): string | null {
@@ -91,11 +96,13 @@ export function matchProduct(cell: string): ProductId | null {
     if (n === normalize(product.name) || n === product.id) return product.id;
   }
 
+  const liveIds = new Set(PRODUCTS.map((product) => product.id));
   const rankedAliases = (Object.entries(aliases) as [ProductId, string[]][])
     .flatMap(([id, list]) => list.map((alias) => ({ id, alias })))
     .sort((a, b) => b.alias.length - a.alias.length);
 
   for (const { id, alias } of rankedAliases) {
+    if (!liveIds.has(id)) continue;
     if (n === alias || n.includes(alias)) return id;
   }
 
@@ -105,10 +112,22 @@ export function matchProduct(cell: string): ProductId | null {
 export function matchLocation(cell: string): LocationId | null {
   const n = normalize(cell);
   if (!n) return null;
-  if (n.includes('루씨엠') || n === 'lucciem' || n === '사무실') return 'lucciem';
-  if (n.includes('세일정밀') || n === 'seil') return 'seil';
-  if (n.includes('아이진') || n === 'ijin') return 'ijin';
-  if (n === 'etc' || n.startsWith('etc') || n.includes('기타')) return 'etc';
+  for (const location of LOCATIONS) {
+    const sheetName = getLocationSheetName(location.id);
+    if (
+      n === normalize(location.name) ||
+      n === normalize(location.shortName) ||
+      n === location.id ||
+      (sheetName && n === normalize(sheetName))
+    ) {
+      return location.id;
+    }
+  }
+  const live = new Set(LOCATIONS.map((location) => location.id));
+  if (live.has('lucciem') && (n.includes('루씨엠') || n === 'lucciem' || n === '사무실')) return 'lucciem';
+  if (live.has('seil') && (n.includes('세일정밀') || n === 'seil')) return 'seil';
+  if (live.has('ijin') && (n.includes('아이진') || n === 'ijin')) return 'ijin';
+  if (live.has('etc') && (n === 'etc' || n.startsWith('etc') || n.includes('기타'))) return 'etc';
   return null;
 }
 
@@ -452,5 +471,7 @@ export async function importGoogleSheet(
     throw new Error('시트에서 탭을 찾지 못했습니다.');
   }
 
-  return parseGoogleWorkbook(workbook);
+  const masterData = parseMasterDataSheet(workbook);
+  if (masterData) applyMasterData(masterData);
+  return { ...parseGoogleWorkbook(workbook), masterData };
 }

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { LocationId, MovementType, ProductId, StockMovement } from '../types';
 import { LOCATIONS, PRODUCTS } from '../data/initialData';
+import { getCategoryLabel } from '../data/masterData';
 import {
   X,
   ArrowLeftRight,
@@ -428,7 +429,7 @@ export const MovementModal: React.FC<MovementModalProps> = ({
                       >
                         {PRODUCTS.map((prod) => (
                           <option key={prod.id} value={prod.id}>
-                            {prod.name} ({prod.category})
+                            {prod.name} ({getCategoryLabel(prod.category)})
                           </option>
                         ))}
                       </select>

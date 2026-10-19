@@ -33264,9 +33264,6 @@ var XLSX3 = __toESM(require_xlsx(), 1);
 // src/utils/googleSheetMutate.ts
 var XLSX2 = __toESM(require_xlsx(), 1);
 
-// src/utils/googleSheetSync.ts
-var XLSX = __toESM(require_xlsx(), 1);
-
 // src/data/initialData.ts
 var LOCATIONS = [
   {
@@ -33449,6 +33446,63 @@ var PRODUCTS = [
   }
 ];
 
+// src/data/masterData.ts
+var BUILTIN_LEDGER_SHEET_NAMES = {
+  lucciem: "\uB8E8\uC528\uC5E0-\uC624\uB984\uCC28\uC21C",
+  seil: "\uC138\uC77C\uC815\uBC00\uACF5\uC5C5-\uC624\uB984\uCC28\uC21C",
+  ijin: "\uC544\uC774\uC9C4-\uC624\uB984\uCC28\uC21C",
+  etc: "etc-\uC624\uB984\uCC28\uC21C"
+};
+var PRODUCT_CATEGORIES = [
+  "Smart AED",
+  "\uC77C\uBC18\uBCF4\uAD00\uD568",
+  "\uC625\uC678/\uC774\uB3D9/\uD2B9\uC218",
+  "\uC804\uC7A5\uBD80\uD488"
+];
+var DEFAULT_CATEGORY_LABELS = {
+  "Smart AED": "Smart AED",
+  \uC77C\uBC18\uBCF4\uAD00\uD568: "\uC77C\uBC18\uBCF4\uAD00\uD568",
+  "\uC625\uC678/\uC774\uB3D9/\uD2B9\uC218": "\uC625\uC678 / \uC774\uB3D9 / \uD2B9\uC218",
+  \uC804\uC7A5\uBD80\uD488: "\uC804\uC7A5\uBD80\uD488"
+};
+var DEFAULT_PRODUCTS = PRODUCTS.map((product) => ({
+  id: product.id,
+  name: product.name,
+  unit: product.unit,
+  unitCostEstimate: product.unitCostEstimate,
+  category: product.category
+}));
+var DEFAULT_LOCATIONS = LOCATIONS.map((location) => ({
+  id: location.id,
+  name: location.name,
+  shortName: location.shortName,
+  description: location.description,
+  sheetName: BUILTIN_LEDGER_SHEET_NAMES[location.id] || `${location.shortName}-\uC624\uB984\uCC28\uC21C`
+}));
+var DEFAULT_MASTER_DATA = {
+  products: DEFAULT_PRODUCTS,
+  locations: DEFAULT_LOCATIONS,
+  categories: PRODUCT_CATEGORIES.map((id) => ({ id, label: DEFAULT_CATEGORY_LABELS[id] })),
+  suppliers: ["\uC138\uC77C\uC815\uBC00\uACF5\uC5C5", "\uC544\uC774\uC9C4", "SMT"]
+};
+var activeCategoryLabels = { ...DEFAULT_CATEGORY_LABELS };
+var activeSuppliers = [...DEFAULT_MASTER_DATA.suppliers];
+var activeLedgerNames = { ...BUILTIN_LEDGER_SHEET_NAMES };
+function getLocationSheetName(locationId) {
+  return activeLedgerNames[locationId] || null;
+}
+function findLocationIdBySheetName(sheetName) {
+  const found = Object.entries(activeLedgerNames).find(([, name]) => name === sheetName);
+  return found?.[0] || null;
+}
+
+// src/utils/googleSheetSync.ts
+var XLSX = __toESM(require_xlsx(), 1);
+
+// src/utils/masterDataSheet.ts
+var MASTER_DATA_SHEET_NAME = "\uB9C8\uC2A4\uD130\uB370\uC774\uD130";
+var MASTER_DATA_HEADER = ["\uAD6C\uBD84", "ID", "\uC774\uB984", "\uC57D\uCE6D", "\uB2E8\uC704", "\uB2E8\uAC00", "\uC124\uBA85", "\uBD84\uB958", "\uC2DC\uD2B8\uD0ED"];
+
 // src/utils/googleSheetSync.ts
 var ACTIVE_LEDGER_SHEET_NAMES = {
   lucciem: "\uB8E8\uC528\uC5E0-\uC624\uB984\uCC28\uC21C",
@@ -33457,10 +33511,7 @@ var ACTIVE_LEDGER_SHEET_NAMES = {
   etc: "etc-\uC624\uB984\uCC28\uC21C"
 };
 function activeLedgerLocation(sheetName) {
-  const entry = Object.entries(ACTIVE_LEDGER_SHEET_NAMES).find(
-    ([, expectedName]) => expectedName === sheetName
-  );
-  return entry?.[0] || null;
+  return findLocationIdBySheetName(sheetName) || (Object.entries(ACTIVE_LEDGER_SHEET_NAMES).find(([, expectedName]) => expectedName === sheetName)?.[0] ?? null);
 }
 function normalize(text) {
   return String(text).toLowerCase().replace(/\s+/g, "").replace(/[()[\]{}]/g, "").replace(/보관함/g, "");
@@ -33500,8 +33551,10 @@ function matchProduct(cell) {
   for (const product of PRODUCTS) {
     if (n === normalize(product.name) || n === product.id) return product.id;
   }
+  const liveIds = new Set(PRODUCTS.map((product) => product.id));
   const rankedAliases = Object.entries(aliases).flatMap(([id, list]) => list.map((alias) => ({ id, alias }))).sort((a, b) => b.alias.length - a.alias.length);
   for (const { id, alias } of rankedAliases) {
+    if (!liveIds.has(id)) continue;
     if (n === alias || n.includes(alias)) return id;
   }
   return null;
@@ -33509,10 +33562,17 @@ function matchProduct(cell) {
 function matchLocation(cell) {
   const n = normalize(cell);
   if (!n) return null;
-  if (n.includes("\uB8E8\uC528\uC5E0") || n === "lucciem" || n === "\uC0AC\uBB34\uC2E4") return "lucciem";
-  if (n.includes("\uC138\uC77C\uC815\uBC00") || n === "seil") return "seil";
-  if (n.includes("\uC544\uC774\uC9C4") || n === "ijin") return "ijin";
-  if (n === "etc" || n.startsWith("etc") || n.includes("\uAE30\uD0C0")) return "etc";
+  for (const location of LOCATIONS) {
+    const sheetName = getLocationSheetName(location.id);
+    if (n === normalize(location.name) || n === normalize(location.shortName) || n === location.id || sheetName && n === normalize(sheetName)) {
+      return location.id;
+    }
+  }
+  const live = new Set(LOCATIONS.map((location) => location.id));
+  if (live.has("lucciem") && (n.includes("\uB8E8\uC528\uC5E0") || n === "lucciem" || n === "\uC0AC\uBB34\uC2E4")) return "lucciem";
+  if (live.has("seil") && (n.includes("\uC138\uC77C\uC815\uBC00") || n === "seil")) return "seil";
+  if (live.has("ijin") && (n.includes("\uC544\uC774\uC9C4") || n === "ijin")) return "ijin";
+  if (live.has("etc") && (n === "etc" || n.startsWith("etc") || n.includes("\uAE30\uD0C0"))) return "etc";
   return null;
 }
 function parseSignedQuantity(value) {
@@ -33765,8 +33825,8 @@ function parseGoogleWorkbook(workbook) {
 
 // src/utils/googleSheetMutate.ts
 function locationSheetName(workbook, locationId) {
-  const expectedName = ACTIVE_LEDGER_SHEET_NAMES[locationId];
-  return workbook.SheetNames.includes(expectedName) ? expectedName : null;
+  const expectedName = getLocationSheetName(locationId) || ACTIVE_LEDGER_SHEET_NAMES[locationId];
+  return expectedName && workbook.SheetNames.includes(expectedName) ? expectedName : null;
 }
 function productColMap(header) {
   const cols = {};
@@ -34242,6 +34302,8 @@ function applyMovementToStocks(currentStocks, movement) {
 
 // server/googleSheetProxy.ts
 var SHEET_ID_PATTERN = /^[a-zA-Z0-9-_]{20,}$/;
+var MASTER_DATA_MIN_SCRIPT_VERSION = 9;
+var SHEET_TAB_PATTERN = /^[^\\/?*[\]:]{1,80}$/;
 var sheetWriteLocks = /* @__PURE__ */ new Map();
 function withSheetWriteLock(sheetId, task) {
   const key = sheetId || "__default__";
@@ -34336,6 +34398,138 @@ function explainAppsScriptResponse(text) {
   }
   return text.slice(0, 280);
 }
+var MASTER_DATA_MAX_ROWS = 200;
+var MASTER_DATA_MAX_CELL_LENGTH = 200;
+function textList(value, max) {
+  if (!Array.isArray(value) || value.length > max) return null;
+  const items = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.length > 80) return null;
+    items.push(entry);
+  }
+  return items;
+}
+function validateStructureItems(value, withSheet) {
+  if (!Array.isArray(value) || value.length > 40) return null;
+  const items = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") return null;
+    const record = entry;
+    const id = String(record.id || "");
+    const name = String(record.name || "");
+    const match = textList(record.match, 12);
+    if (!/^[a-zA-Z0-9_\uac00-\ud7a3 /()-]{1,50}$/.test(id) || !name || name.length > 80 || !match) {
+      return null;
+    }
+    const item = { id, name, match };
+    if (withSheet) {
+      const sheetName = String(record.sheetName || "");
+      const shortName = String(record.shortName || "");
+      if (!sheetName.endsWith("-\uC624\uB984\uCC28\uC21C") || !SHEET_TAB_PATTERN.test(sheetName) || shortName.length > 80) {
+        return null;
+      }
+      item.shortName = shortName;
+      item.sheetName = sheetName;
+    }
+    items.push(item);
+  }
+  return items;
+}
+function validateMasterStructure(value) {
+  if (!value || typeof value !== "object") return null;
+  const record = value;
+  const products = validateStructureItems(record.products, false);
+  const removedProducts = validateStructureItems(record.removedProducts, false);
+  const locations = validateStructureItems(record.locations, true);
+  const removedLocations = validateStructureItems(record.removedLocations, true);
+  if (!products || !removedProducts || !locations || !removedLocations) return null;
+  if (products.length === 0 || locations.length === 0) return null;
+  return { products, removedProducts, locations, removedLocations };
+}
+function validateMasterDataRows(rows) {
+  if (!Array.isArray(rows) || rows.length === 0 || rows.length > MASTER_DATA_MAX_ROWS) return null;
+  const header = MASTER_DATA_HEADER;
+  const validated = [];
+  for (const row of rows) {
+    if (!Array.isArray(row) || row.length !== header.length) return null;
+    const cells = row.map((cell) => typeof cell === "string" ? cell : null);
+    if (cells.some((cell) => cell === null || cell.length > MASTER_DATA_MAX_CELL_LENGTH)) {
+      return null;
+    }
+    validated.push(cells);
+  }
+  if (validated[0].some((cell, index) => cell !== header[index])) return null;
+  return validated;
+}
+async function saveMasterDataViaWebhook(webhookUrl, sheetId, rawRows, rawStructure) {
+  if (!isAllowedWebhook(webhookUrl)) {
+    return {
+      status: 400,
+      json: { ok: false, error: "\uB9C8\uC2A4\uD130 \uB370\uC774\uD130 \uC800\uC7A5\uC5D0\uB294 Apps Script \uC6F9\uC571 URL\uC774 \uD544\uC694\uD569\uB2C8\uB2E4." }
+    };
+  }
+  if (!SHEET_ID_PATTERN.test(sheetId)) {
+    return { status: 400, json: { ok: false, error: "\uC62C\uBC14\uB978 \uAD6C\uAE00 \uC2DC\uD2B8 ID\uAC00 \uC544\uB2D9\uB2C8\uB2E4." } };
+  }
+  const rows = validateMasterDataRows(rawRows);
+  const structure = validateMasterStructure(rawStructure);
+  if (!rows || !structure) {
+    return { status: 400, json: { ok: false, error: "\uB9C8\uC2A4\uD130 \uB370\uC774\uD130 \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4." } };
+  }
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    redirect: "follow",
+    cache: "no-store",
+    signal: AbortSignal.timeout(5e4),
+    headers: {
+      "Content-Type": "text/plain;charset=utf-8",
+      "User-Agent": "Mozilla/5.0 SheetStockSync/1.0",
+      "Cache-Control": "no-cache, no-store, max-age=0"
+    },
+    body: JSON.stringify({
+      action: "SAVE_MASTER_DATA",
+      sheetId,
+      sheetName: MASTER_DATA_SHEET_NAME,
+      rows,
+      structure
+    })
+  });
+  const text = await response.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { status: 502, json: { ok: false, error: explainAppsScriptResponse(text) } };
+  }
+  if (typeof parsed.version !== "number" || parsed.version < MASTER_DATA_MIN_SCRIPT_VERSION) {
+    return {
+      status: 502,
+      json: {
+        ok: false,
+        error: "Apps Script\uAC00 \uC774\uC804 \uBC84\uC804\uC774\uB77C \uB9C8\uC2A4\uD130 \uB370\uC774\uD130\uB97C \uC800\uC7A5\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uC2DC\uD2B8 \uC124\uC815\uC5D0\uC11C \uCD5C\uC2E0 \uCF54\uB4DC\uB97C \uBCF5\uC0AC\uD574 \uC6F9 \uC571\uC744 \uC0C8 \uBC84\uC804\uC73C\uB85C \uC7AC\uBC30\uD3EC\uD558\uC138\uC694."
+      }
+    };
+  }
+  if (parsed.ok === false) {
+    return {
+      status: 502,
+      json: { ok: false, error: parsed.error || "Apps Script\uC5D0\uC11C \uB9C8\uC2A4\uD130 \uB370\uC774\uD130 \uC800\uC7A5\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4." }
+    };
+  }
+  if (parsed.appendedCount !== rows.length) {
+    return {
+      status: 502,
+      json: {
+        ok: false,
+        error: `\uB9C8\uC2A4\uD130 \uB370\uC774\uD130 \uBC18\uC601 \uD589 \uC218\uAC00 \uC77C\uCE58\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. ${parsed.appendedCount}/${rows.length}`
+      }
+    };
+  }
+  return {
+    status: 200,
+    json: { ok: true, version: parsed.version, appendedCount: rows.length, updatedCount: 0, deletedCount: 0 }
+  };
+}
 async function handleGoogleSheetSave(body) {
   const sheetId = String(body.sheetId || "").trim();
   return withSheetWriteLock(sheetId, () => executeGoogleSheetSave(body));
@@ -34355,6 +34549,9 @@ async function executeGoogleSheetSave(body) {
         error: "\uC2DC\uD2B8\uC5D0 \uC800\uC7A5\uD558\uB824\uBA74 \uC124\uC815\uC5D0\uC11C Apps Script \uC6F9\uC571 URL\uC744 \uB4F1\uB85D\uD574 \uC8FC\uC138\uC694."
       }
     };
+  }
+  if (action === "SAVE_MASTER_DATA") {
+    return saveMasterDataViaWebhook(webhookUrl, sheetId, body.rows, body.structure);
   }
   let appends = [];
   let updates = [];

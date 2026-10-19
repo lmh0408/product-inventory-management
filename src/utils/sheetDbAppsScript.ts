@@ -1,6 +1,6 @@
 /** Google Apps Script 웹앱 소스. 시트 [확장 프로그램] → [Apps Script]에 붙여넣고 웹 앱으로 배포합니다. */
 export const SHEET_DB_APPS_SCRIPT = `function doGet() {
-  return json_({ ok: true, service: "SheetStock DB", version: 7 });
+  return json_({ ok: true, service: "SheetStock DB", version: 9 });
 }
 
 function doPost(e) {
@@ -12,7 +12,7 @@ function doPost(e) {
     if (!e || !e.postData || !e.postData.contents) {
       return json_({
         ok: false,
-        version: 7,
+        version: 9,
         error: "POST 본문이 없습니다. 웹 앱 액세스를 모든 사용자로 다시 배포했는지 확인하세요.",
       });
     }
@@ -20,11 +20,16 @@ function doPost(e) {
     var ss = payload.sheetId
       ? SpreadsheetApp.openById(payload.sheetId)
       : SpreadsheetApp.getActiveSpreadsheet();
+    activeSs_ = ss;
+    requestCatalog_ = null;
     var result;
     if (payload.action === "SYNC_APP_DATA") {
       result = replaceLedgers_(ss, payload.replacements || [], payload.updates || []);
     } else if (payload.action === "DELETE_MOVEMENTS") {
       result = deleteRows_(ss, payload.deletes || []);
+    } else if (payload.action === "SAVE_MASTER_DATA") {
+      if (payload.structure) applyMasterStructure_(ss, payload.structure);
+      result = writeMasterData_(ss, payload.sheetName, payload.rows || []);
     } else if ((payload.appends && payload.appends.length) || (payload.updates && payload.updates.length)) {
       result = applyWrites_(ss, payload.appends || [], payload.updates || []);
     } else {
@@ -33,7 +38,7 @@ function doPost(e) {
     SpreadsheetApp.flush();
     return json_({
       ok: true,
-      version: 7,
+      version: 9,
       appendedCount: result.appendedCount || 0,
       updatedCount: result.updatedCount || 0,
       deletedCount: result.deletedCount || 0,
@@ -41,11 +46,282 @@ function doPost(e) {
   } catch (err) {
     return json_({
       ok: false,
-      version: 7,
+      version: 9,
       error: String(err && err.message ? err.message : err),
     });
   } finally {
     if (locked) lock.releaseLock();
+  }
+}
+
+function writeMasterData_(ss, sheetName, rows) {
+  if (sheetName !== "마스터데이터") throw new Error("마스터 데이터는 마스터데이터 탭에만 저장할 수 있습니다.");
+  if (!rows.length || rows.length > 200) throw new Error("마스터 데이터 행 수가 올바르지 않습니다.");
+  var width = rows[0].length;
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i] || rows[i].length !== width) throw new Error("마스터 데이터 열 수가 일치하지 않습니다.");
+  }
+  var sheet = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
+  sheet.clearContents();
+  var range = sheet.getRange(1, 1, rows.length, width);
+  range.setNumberFormat("@");
+  range.setValues(rows);
+  return { appendedCount: rows.length, updatedCount: 0, deletedCount: 0 };
+}
+
+var activeSs_ = null;
+var requestCatalog_ = null;
+
+function norm_(value) {
+  return String(value || "").toLowerCase().replace(/\\s+/g, "").replace(/[()\\[\\]{}]/g, "").replace(/보관함/g, "");
+}
+
+function ensureCatalog_() {
+  if (requestCatalog_ || !activeSs_) return;
+  requestCatalog_ = readMasterCatalog_(activeSs_);
+}
+
+function readMasterCatalog_(ss) {
+  var products = {};
+  var locations = {};
+  var sheet = ss.getSheetByName("마스터데이터");
+  if (!sheet) return { products: products, locations: locations };
+  var values = sheet.getDataRange().getDisplayValues();
+  if (!values.length) return { products: products, locations: locations };
+  var cols = {};
+  for (var c = 0; c < values[0].length; c++) cols[String(values[0][c] || "")] = c;
+  var idCol = cols["ID"];
+  var nameCol = cols["이름"];
+  var kindCol = cols["구분"];
+  if (idCol == null || nameCol == null || kindCol == null) return { products: products, locations: locations };
+  for (var r = 1; r < values.length; r++) {
+    var kind = String(values[r][kindCol] || "");
+    var id = String(values[r][idCol] || "");
+    var name = String(values[r][nameCol] || "");
+    if (!id) continue;
+    if (kind === "제품") products[id] = name;
+    if (kind === "거점") {
+      locations[id] = {
+        name: name,
+        shortName: cols["약칭"] == null ? "" : String(values[r][cols["약칭"]] || ""),
+        sheetName: cols["시트탭"] == null ? "" : String(values[r][cols["시트탭"]] || "")
+      };
+    }
+  }
+  return { products: products, locations: locations };
+}
+
+function tokensMatch_(label, matchList) {
+  var n = norm_(label);
+  if (!n || !matchList) return false;
+  for (var i = 0; i < matchList.length; i++) if (norm_(matchList[i]) === n) return true;
+  return false;
+}
+
+function findHeaderCol_(header, matchList) {
+  for (var c = 0; c < header.length; c++) if (tokensMatch_(header[c], matchList)) return c + 1;
+  return 0;
+}
+
+function uniqueSheetName_(ss, base) {
+  var name = String(base || "백업").slice(0, 99);
+  var n = 2;
+  while (ss.getSheetByName(name)) {
+    name = (String(base).slice(0, 90) + "_" + n).slice(0, 99);
+    n++;
+  }
+  return name;
+}
+
+function backupSheet_(ss, sheet, stamp, backed) {
+  var key = String(sheet.getSheetId());
+  if (backed[key]) return;
+  backed[key] = true;
+  var copy = sheet.copyTo(ss);
+  copy.setName(uniqueSheetName_(ss, sheet.getName() + "_백업_" + stamp));
+}
+
+function readDashboardLayout_(sheet) {
+  var values = sheet.getDataRange().getDisplayValues();
+  var headerRow = -1;
+  for (var r = 0; r < Math.min(values.length, 12); r++) {
+    var joined = values[r].join(" ");
+    if (String(values[r][0] || "").indexOf("장소") >= 0 || (joined.indexOf("장소") >= 0 && joined.indexOf("비고") >= 0)) {
+      headerRow = r;
+      break;
+    }
+  }
+  if (headerRow < 0) return null;
+  var header = values[headerRow].slice();
+  var locCol = 1;
+  var remarksCol = 0;
+  for (var c = 0; c < header.length; c++) {
+    var h = String(header[c] || "");
+    if (h.indexOf("장소") >= 0 || h.indexOf("거점") >= 0) locCol = c + 1;
+    if (h.indexOf("비고") >= 0 || h.indexOf("메모") >= 0) remarksCol = c + 1;
+  }
+  return {
+    headerRow: headerRow + 1,
+    header: header,
+    locCol: locCol,
+    insertAt: remarksCol > 0 ? remarksCol : header.length + 1
+  };
+}
+
+function readLedgerLayout_(sheet) {
+  var values = sheet.getDataRange().getDisplayValues();
+  var headerRow = -1;
+  var onHandRow = -1;
+  for (var r = 0; r < Math.min(values.length, 15); r++) {
+    var joined = values[r].join(" ");
+    if (String(values[r][0] || "").indexOf("현재재고") >= 0) onHandRow = r + 1;
+    if ((joined.indexOf("날짜") >= 0 || joined.indexOf("일자") >= 0) && (joined.indexOf("입출고") >= 0 || joined.indexOf("구분") >= 0)) {
+      headerRow = r;
+    }
+  }
+  if (headerRow < 0) return null;
+  var header = values[headerRow].slice();
+  return { headerRow: headerRow + 1, header: header, onHandRow: onHandRow, insertAt: header.length + 1 };
+}
+
+function zeroDashboardColumn_(sheet, headerRow, col) {
+  var values = sheet.getDataRange().getDisplayValues();
+  for (var r = headerRow; r < values.length; r++) {
+    var label = String(values[r][0] || "");
+    if (!label) continue;
+    sheet.getRange(r + 1, col).setValue(0);
+    if (label.indexOf("합계") >= 0 || label.indexOf("총계") >= 0) break;
+  }
+}
+
+function syncProductColumns_(ss, sheet, kind, products, removedProducts, stamp, backed) {
+  var layout = kind === "dashboard" ? readDashboardLayout_(sheet) : readLedgerLayout_(sheet);
+  if (!layout) return;
+  var removeCols = [];
+  for (var i = 0; i < removedProducts.length; i++) {
+    var found = findHeaderCol_(layout.header, removedProducts[i].match || []);
+    if (found > 0 && removeCols.indexOf(found) < 0) removeCols.push(found);
+  }
+  removeCols.sort(function(a, b) { return b - a; });
+  if (removeCols.length) {
+    backupSheet_(ss, sheet, stamp, backed);
+    for (var d = 0; d < removeCols.length; d++) sheet.deleteColumn(removeCols[d]);
+    layout = kind === "dashboard" ? readDashboardLayout_(sheet) : readLedgerLayout_(sheet);
+    if (!layout) return;
+  }
+  for (var p = 0; p < products.length; p++) {
+    var existing = findHeaderCol_(layout.header, products[p].match || []);
+    if (existing > 0) {
+      if (String(layout.header[existing - 1] || "") !== String(products[p].name || "")) {
+        sheet.getRange(layout.headerRow, existing).setValue(products[p].name);
+        layout.header[existing - 1] = products[p].name;
+      }
+      continue;
+    }
+    var at = layout.insertAt;
+    if (at <= layout.header.length) {
+      sheet.insertColumnBefore(at);
+      layout.header.splice(at - 1, 0, products[p].name);
+    } else {
+      layout.header.push(products[p].name);
+    }
+    sheet.getRange(layout.headerRow, at).setValue(products[p].name);
+    if (kind === "dashboard") zeroDashboardColumn_(sheet, layout.headerRow, at);
+    else if (layout.onHandRow) sheet.getRange(layout.onHandRow, at).setValue(0);
+    layout.insertAt = at + 1;
+  }
+}
+
+function syncDashboardLocations_(sheet, locations, removedLocations) {
+  var layout = readDashboardLayout_(sheet);
+  if (!layout) return;
+  var values = sheet.getDataRange().getDisplayValues();
+  var rows = [];
+  for (var r = layout.headerRow; r < values.length; r++) {
+    var label = String(values[r][layout.locCol - 1] || "");
+    if (label.indexOf("합계") >= 0 || label.indexOf("총계") >= 0) break;
+    for (var i = 0; i < removedLocations.length; i++) {
+      if (tokensMatch_(label, removedLocations[i].match || [])) rows.push(r + 1);
+    }
+  }
+  rows.sort(function(a, b) { return b - a; });
+  for (var d = 0; d < rows.length; d++) sheet.deleteRow(rows[d]);
+  values = sheet.getDataRange().getDisplayValues();
+  layout = readDashboardLayout_(sheet);
+  if (!layout) return;
+  var totalRow = 0;
+  for (var r2 = layout.headerRow; r2 < values.length; r2++) {
+    var text = String(values[r2][layout.locCol - 1] || "");
+    if (text.indexOf("합계") >= 0 || text.indexOf("총계") >= 0) {
+      totalRow = r2 + 1;
+      break;
+    }
+  }
+  for (var j = 0; j < locations.length; j++) {
+    var row = 0;
+    for (var r3 = layout.headerRow; r3 < values.length; r3++) {
+      if (tokensMatch_(values[r3][layout.locCol - 1], locations[j].match || [])) {
+        row = r3 + 1;
+        break;
+      }
+    }
+    if (row > 0) {
+      sheet.getRange(row, layout.locCol).setValue(locations[j].name);
+      continue;
+    }
+    var at = totalRow > 0 ? totalRow : sheet.getLastRow() + 1;
+    sheet.insertRowBefore(at);
+    sheet.getRange(at, layout.locCol).setValue(locations[j].name);
+    if (totalRow > 0) totalRow++;
+    values = sheet.getDataRange().getDisplayValues();
+  }
+}
+
+function createLocationSheet_(ss, sheetName, productNames) {
+  var sheet = ss.insertSheet(sheetName);
+  var headers = ["날짜", "입출고", "내역", "납품처"].concat(productNames);
+  sheet.getRange(1, 1).setValue("현재재고");
+  sheet.getRange(2, 1, 1, headers.length).setValues([headers]);
+  if (productNames.length) {
+    var zeros = [];
+    for (var i = 0; i < productNames.length; i++) zeros.push(0);
+    sheet.getRange(1, 5, 1, productNames.length).setValues([zeros]);
+  }
+}
+
+function applyMasterStructure_(ss, spec) {
+  var products = spec.products || [];
+  var locations = spec.locations || [];
+  var removedProducts = spec.removedProducts || [];
+  var removedLocations = spec.removedLocations || [];
+  if (!products.length || !locations.length || products.length > 40 || locations.length > 20) {
+    throw new Error("마스터 데이터 구성이 올바르지 않습니다.");
+  }
+  var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || "Asia/Seoul", "yyyyMMdd_HHmmss");
+  var backed = {};
+  for (var i = 0; i < removedLocations.length; i++) {
+    var sheetName = String(removedLocations[i].sheetName || "");
+    if (!sheetName || sheetName === "마스터데이터") continue;
+    var removedSheet = ss.getSheetByName(sheetName);
+    if (!removedSheet) continue;
+    backupSheet_(ss, removedSheet, stamp, backed);
+    ss.deleteSheet(removedSheet);
+  }
+  var names = [];
+  for (var p = 0; p < products.length; p++) names.push(String(products[p].name || ""));
+  for (var j = 0; j < locations.length; j++) {
+    var liveName = String(locations[j].sheetName || "");
+    if (!liveName || ss.getSheetByName(liveName)) continue;
+    createLocationSheet_(ss, liveName, names);
+  }
+  var dash = findDashboard_(ss);
+  if (dash) {
+    syncProductColumns_(ss, dash, "dashboard", products, removedProducts, stamp, backed);
+    syncDashboardLocations_(dash, locations, removedLocations);
+  }
+  for (var k = 0; k < locations.length; k++) {
+    var live = ss.getSheetByName(String(locations[k].sheetName || ""));
+    if (live) syncProductColumns_(ss, live, "ledger", products, removedProducts, stamp, backed);
   }
 }
 
@@ -328,7 +604,9 @@ function inspectLedger_(sheet) {
 function writeDashboardAndOnHand_(ss, stocks) {
   var dash = findDashboard_(ss);
   if (dash) writeMatrix_(dash, stocks, true);
-  var ids = ["lucciem", "seil", "ijin", "etc"];
+  ensureCatalog_();
+  var ids = Object.keys((requestCatalog_ && requestCatalog_.locations) || {});
+  if (!ids.length) ids = ["lucciem", "seil", "ijin", "etc"];
   for (var i = 0; i < ids.length; i++) {
     var locSheet = findLocationSheet_(ss, ids[i]);
     if (locSheet) writeOnHand_(locSheet, stocks, ids[i]);
@@ -447,23 +725,44 @@ function findDashboard_(ss) {
 }
 
 function findLocationSheet_(ss, locationId) {
+  ensureCatalog_();
+  var loc = requestCatalog_ && requestCatalog_.locations ? requestCatalog_.locations[locationId] : null;
+  if (loc && loc.sheetName) {
+    var named = ss.getSheetByName(loc.sheetName);
+    if (named) return named;
+  }
   var exact = { lucciem: "루씨엠-오름차순", seil: "세일정밀공업-오름차순", ijin: "아이진-오름차순", etc: "etc-오름차순" };
   var want = exact[locationId];
   return want ? ss.getSheetByName(want) : null;
 }
 
 function matchLocation_(label) {
-  var n = String(label).replace(/\\s+/g, "");
-  if (n.indexOf("루씨엠") >= 0 || n === "사무실") return "lucciem";
-  if (n.indexOf("세일정밀") >= 0) return "seil";
-  if (n.indexOf("아이진") >= 0) return "ijin";
-  if (n.toLowerCase() === "etc" || n.toLowerCase().indexOf("etc") === 0) return "etc";
+  ensureCatalog_();
+  var n = norm_(label);
+  if (!n) return null;
+  var locs = (requestCatalog_ && requestCatalog_.locations) || {};
+  var ids = Object.keys(locs);
+  for (var i = 0; i < ids.length; i++) {
+    var loc = locs[ids[i]];
+    if (n === ids[i] || n === norm_(loc.name) || n === norm_(loc.shortName) || n === norm_(loc.sheetName)) return ids[i];
+  }
+  var known = ids.length > 0;
+  if ((!known || locs.lucciem) && (n.indexOf("루씨엠") >= 0 || n === "사무실")) return "lucciem";
+  if ((!known || locs.seil) && n.indexOf("세일정밀") >= 0) return "seil";
+  if ((!known || locs.ijin) && n.indexOf("아이진") >= 0) return "ijin";
+  if ((!known || locs.etc) && (n === "etc" || n.indexOf("etc") === 0 || n.indexOf("기타") >= 0)) return "etc";
   return null;
 }
 
 function matchProduct_(label) {
-  var n = String(label || "").toLowerCase().replace(/\\s+/g, "").replace(/[()[\\]{}]/g, "").replace(/보관함/g, "");
+  var n = norm_(label);
   if (!n) return null;
+  ensureCatalog_();
+  var products = (requestCatalog_ && requestCatalog_.products) || {};
+  var ids = Object.keys(products);
+  for (var i = 0; i < ids.length; i++) {
+    if (n === ids[i] || n === norm_(products[ids[i]])) return ids[i];
+  }
   var map = [
     ["smart_top_eng", ["smart상단영문", "영문상단"]],
     ["std_top_samsung", ["일반상단삼성", "삼성상단"]],
@@ -479,6 +778,7 @@ function matchProduct_(label) {
     ["mobile", ["이동"]]
   ];
   for (var i = 0; i < map.length; i++) {
+    if (ids.length && !products[map[i][0]]) continue;
     var aliases = map[i][1];
     for (var j = 0; j < aliases.length; j++) {
       if (n === aliases[j] || n.indexOf(aliases[j]) >= 0) return map[i][0];

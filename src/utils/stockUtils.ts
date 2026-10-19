@@ -181,9 +181,13 @@ export function calculateCategoryTotals(stocks: LocationStock[]): {
     return pIds.reduce((sum, id) => sum + (targetMap[id] || 0), 0);
   };
 
-  const smartPIds: ProductId[] = ['smart_top', 'smart_bottom', 'smart_top_eng'];
-  const stdPIds: ProductId[] = ['std_top', 'std_bottom', 'std_top_samsung', 'std_bottom_samsung'];
-  const specialPIds: ProductId[] = ['outdoor', 'mobile', 'forklift_bag', 'semi_outdoor'];
+  const idsOf = (category: string) =>
+    PRODUCTS.filter((product) => product.category === category && product.id !== 'terminal_board').map(
+      (product) => product.id
+    );
+  const smartPIds = idsOf('Smart AED');
+  const stdPIds = idsOf('일반보관함');
+  const specialPIds = idsOf('옥외/이동/특수');
 
   const smartAED = {
     lucciem: getQty('lucciem', smartPIds),
@@ -197,7 +201,7 @@ export function calculateCategoryTotals(stocks: LocationStock[]): {
       getQty('ijin', smartPIds, true) +
       getQty('etc', smartPIds, true),
   };
-  smartAED.total = smartAED.lucciem + smartAED.seil + smartAED.ijin + smartAED.etc;
+  smartAED.total = stocks.reduce((sum, stock) => sum + getQty(stock.locationId, smartPIds), 0);
 
   const standard = {
     lucciem: getQty('lucciem', stdPIds),
@@ -211,7 +215,7 @@ export function calculateCategoryTotals(stocks: LocationStock[]): {
       getQty('ijin', stdPIds, true) +
       getQty('etc', stdPIds, true),
   };
-  standard.total = standard.lucciem + standard.seil + standard.ijin + standard.etc;
+  standard.total = stocks.reduce((sum, stock) => sum + getQty(stock.locationId, stdPIds), 0);
 
   const special = {
     lucciem: getQty('lucciem', specialPIds),
@@ -225,7 +229,7 @@ export function calculateCategoryTotals(stocks: LocationStock[]): {
       getQty('ijin', specialPIds, true) +
       getQty('etc', specialPIds, true),
   };
-  special.total = special.lucciem + special.seil + special.ijin + special.etc;
+  special.total = stocks.reduce((sum, stock) => sum + getQty(stock.locationId, specialPIds), 0);
 
   const grandTotal = smartAED.total + standard.total + special.total;
   const grandUnassembledTotal = smartAED.unassembled + standard.unassembled + special.unassembled;

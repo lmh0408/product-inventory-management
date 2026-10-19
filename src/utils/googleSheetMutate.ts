@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { LocationId, LocationStock, ProductId, StockMovement } from '../types';
+import { getLocationSheetName } from '../data/masterData';
 import {
   ACTIVE_LEDGER_SHEET_NAMES,
   cellText,
@@ -46,8 +47,8 @@ export interface SheetFullWritePlan extends SheetWritePlan {
 }
 
 function locationSheetName(workbook: XLSX.WorkBook, locationId: LocationId): string | null {
-  const expectedName = ACTIVE_LEDGER_SHEET_NAMES[locationId];
-  return workbook.SheetNames.includes(expectedName) ? expectedName : null;
+  const expectedName = getLocationSheetName(locationId) || ACTIVE_LEDGER_SHEET_NAMES[locationId];
+  return expectedName && workbook.SheetNames.includes(expectedName) ? expectedName : null;
 }
 
 function productColMap(header: string[]): Partial<Record<ProductId, number>> {

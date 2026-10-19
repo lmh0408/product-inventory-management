@@ -9,9 +9,12 @@ import {
   type SheetLedgerReplacement,
 } from '../src/utils/googleSheetMutate';
 import { parseGoogleWorkbook } from '../src/utils/googleSheetSync';
+import { MASTER_DATA_HEADER, MASTER_DATA_SHEET_NAME } from '../src/utils/masterDataSheet';
 import { applyMovementToStocks } from '../src/utils/stockUtils';
 
 export const SHEET_ID_PATTERN = /^[a-zA-Z0-9-_]{20,}$/;
+const MASTER_DATA_MIN_SCRIPT_VERSION = 9;
+const SHEET_TAB_PATTERN = /^[^\\/?*[\]:]{1,80}$/;
 
 const sheetWriteLocks = new Map<string, Promise<unknown>>();
 
@@ -151,6 +154,152 @@ function explainAppsScriptResponse(text: string): string {
   return text.slice(0, 280);
 }
 
+const MASTER_DATA_MAX_ROWS = 200;
+const MASTER_DATA_MAX_CELL_LENGTH = 200;
+
+function textList(value: unknown, max: number): string[] | null {
+  if (!Array.isArray(value) || value.length > max) return null;
+  const items: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string' || entry.length > 80) return null;
+    items.push(entry);
+  }
+  return items;
+}
+
+function validateStructureItems(value: unknown, withSheet: boolean): Record<string, unknown>[] | null {
+  if (!Array.isArray(value) || value.length > 40) return null;
+  const items: Record<string, unknown>[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') return null;
+    const record = entry as Record<string, unknown>;
+    const id = String(record.id || '');
+    const name = String(record.name || '');
+    const match = textList(record.match, 12);
+    if (!/^[a-zA-Z0-9_\uac00-\ud7a3 /()-]{1,50}$/.test(id) || !name || name.length > 80 || !match) {
+      return null;
+    }
+    const item: Record<string, unknown> = { id, name, match };
+    if (withSheet) {
+      const sheetName = String(record.sheetName || '');
+      const shortName = String(record.shortName || '');
+      if (!sheetName.endsWith('-오름차순') || !SHEET_TAB_PATTERN.test(sheetName) || shortName.length > 80) {
+        return null;
+      }
+      item.shortName = shortName;
+      item.sheetName = sheetName;
+    }
+    items.push(item);
+  }
+  return items;
+}
+
+function validateMasterStructure(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const products = validateStructureItems(record.products, false);
+  const removedProducts = validateStructureItems(record.removedProducts, false);
+  const locations = validateStructureItems(record.locations, true);
+  const removedLocations = validateStructureItems(record.removedLocations, true);
+  if (!products || !removedProducts || !locations || !removedLocations) return null;
+  if (products.length === 0 || locations.length === 0) return null;
+  return { products, removedProducts, locations, removedLocations };
+}
+
+function validateMasterDataRows(rows: unknown): string[][] | null {
+  if (!Array.isArray(rows) || rows.length === 0 || rows.length > MASTER_DATA_MAX_ROWS) return null;
+  const header = MASTER_DATA_HEADER as readonly string[];
+  const validated: string[][] = [];
+  for (const row of rows) {
+    if (!Array.isArray(row) || row.length !== header.length) return null;
+    const cells = row.map((cell) => (typeof cell === 'string' ? cell : null));
+    if (cells.some((cell) => cell === null || cell.length > MASTER_DATA_MAX_CELL_LENGTH)) {
+      return null;
+    }
+    validated.push(cells as string[]);
+  }
+  if (validated[0].some((cell, index) => cell !== header[index])) return null;
+  return validated;
+}
+
+async function saveMasterDataViaWebhook(
+  webhookUrl: string,
+  sheetId: string,
+  rawRows: unknown,
+  rawStructure: unknown
+): Promise<JsonHttpResult> {
+  if (!isAllowedWebhook(webhookUrl)) {
+    return {
+      status: 400,
+      json: { ok: false, error: '마스터 데이터 저장에는 Apps Script 웹앱 URL이 필요합니다.' },
+    };
+  }
+  if (!SHEET_ID_PATTERN.test(sheetId)) {
+    return { status: 400, json: { ok: false, error: '올바른 구글 시트 ID가 아닙니다.' } };
+  }
+  const rows = validateMasterDataRows(rawRows);
+  const structure = validateMasterStructure(rawStructure);
+  if (!rows || !structure) {
+    return { status: 400, json: { ok: false, error: '마스터 데이터 형식이 올바르지 않습니다.' } };
+  }
+
+  const response = await fetch(webhookUrl, {
+    method: 'POST',
+    redirect: 'follow',
+    cache: 'no-store',
+    signal: AbortSignal.timeout(50_000),
+    headers: {
+      'Content-Type': 'text/plain;charset=utf-8',
+      'User-Agent': 'Mozilla/5.0 SheetStockSync/1.0',
+      'Cache-Control': 'no-cache, no-store, max-age=0',
+    },
+    body: JSON.stringify({
+      action: 'SAVE_MASTER_DATA',
+      sheetId,
+      sheetName: MASTER_DATA_SHEET_NAME,
+      rows,
+      structure,
+    }),
+  });
+
+  const text = await response.text();
+  let parsed: { ok?: boolean; error?: string; version?: number; appendedCount?: number };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { status: 502, json: { ok: false, error: explainAppsScriptResponse(text) } };
+  }
+  if (typeof parsed.version !== 'number' || parsed.version < MASTER_DATA_MIN_SCRIPT_VERSION) {
+    return {
+      status: 502,
+      json: {
+        ok: false,
+        error:
+          'Apps Script가 이전 버전이라 마스터 데이터를 저장할 수 없습니다. 시트 설정에서 최신 코드를 복사해 웹 앱을 새 버전으로 재배포하세요.',
+      },
+    };
+  }
+  if (parsed.ok === false) {
+    return {
+      status: 502,
+      json: { ok: false, error: parsed.error || 'Apps Script에서 마스터 데이터 저장에 실패했습니다.' },
+    };
+  }
+  if (parsed.appendedCount !== rows.length) {
+    return {
+      status: 502,
+      json: {
+        ok: false,
+        error: `마스터 데이터 반영 행 수가 일치하지 않습니다. ${parsed.appendedCount}/${rows.length}`,
+      },
+    };
+  }
+  return {
+    status: 200,
+    json: { ok: true, version: parsed.version, appendedCount: rows.length, updatedCount: 0, deletedCount: 0 },
+  };
+}
+
 export async function handleGoogleSheetSave(
   body: Record<string, unknown>
 ): Promise<JsonHttpResult> {
@@ -178,6 +327,10 @@ async function executeGoogleSheetSave(
         error: '시트에 저장하려면 설정에서 Apps Script 웹앱 URL을 등록해 주세요.',
       },
     };
+  }
+
+  if (action === 'SAVE_MASTER_DATA') {
+    return saveMasterDataViaWebhook(webhookUrl, sheetId, body.rows, body.structure);
   }
 
   let appends: unknown[] = [];

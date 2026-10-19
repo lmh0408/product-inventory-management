@@ -8,6 +8,7 @@ import {
   ProductId,
 } from '../types';
 import { LOCATIONS, PRODUCTS } from '../data/initialData';
+import { getCategoryLabel } from '../data/masterData';
 import {
   calculateProductTotals,
   calculateCategoryTotals,
@@ -53,6 +54,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return loc ? loc.quantities[prodId] || 0 : 0;
   };
 
+  const locationShortName = (locId: LocationId) =>
+    LOCATIONS.find((l) => l.id === locId)?.shortName || locId;
+
+  const productName = (prodId: ProductId) =>
+    PRODUCTS.find((p) => p.id === prodId)?.name || prodId;
+
   const getLocationRemarks = (locId: string) => {
     const loc = stocks.find((s) => s.locationId === locId);
     return loc?.remarks || '-';
@@ -88,18 +95,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
         <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-slate-600">Smart AED</span>
+            <span className="text-xs font-bold text-slate-600">{getCategoryLabel('Smart AED')}</span>
             <span className="px-2.5 py-0.5 bg-blue-50 text-blue-600 text-xs font-bold rounded-full">
               보유: {categoryTotals.smartAED.total}
             </span>
           </div>
           <div className="text-xs text-slate-600 mt-3 space-y-1.5">
             <div className="flex justify-between">
-              <span className="text-slate-400">사무실 (루씨엠):</span>
+              <span className="text-slate-400">{locationShortName('lucciem')}:</span>
               <span className="font-bold text-slate-800">{categoryTotals.smartAED.lucciem}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">세일정밀공업:</span>
+              <span className="text-slate-400">{locationShortName('seil')}:</span>
               <span className="font-bold text-slate-800">{categoryTotals.smartAED.seil}</span>
             </div>
           </div>
@@ -107,18 +114,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-slate-600">일반보관함</span>
+            <span className="text-xs font-bold text-slate-600">{getCategoryLabel('일반보관함')}</span>
             <span className="px-2.5 py-0.5 bg-blue-50 text-blue-600 text-xs font-bold rounded-full">
               보유: {categoryTotals.standard.total}
             </span>
           </div>
           <div className="text-xs text-slate-600 mt-3 space-y-1.5">
             <div className="flex justify-between">
-              <span className="text-slate-400">사무실 (루씨엠):</span>
+              <span className="text-slate-400">{locationShortName('lucciem')}:</span>
               <span className="font-bold text-slate-800">{categoryTotals.standard.lucciem}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">세일정밀:</span>
+              <span className="text-slate-400">{locationShortName('seil')}:</span>
               <span className="font-bold text-slate-800">{categoryTotals.standard.seil}</span>
             </div>
           </div>
@@ -126,18 +133,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-slate-600">옥외 / 이동 / 특수</span>
+            <span className="text-xs font-bold text-slate-600">{getCategoryLabel('옥외/이동/특수')}</span>
             <span className="px-2.5 py-0.5 bg-blue-50 text-blue-600 text-xs font-bold rounded-full">
               보유: {categoryTotals.special.total}
             </span>
           </div>
           <div className="text-xs text-slate-600 mt-3 space-y-1.5">
             <div className="flex justify-between">
-              <span className="text-slate-400">사무실 (루씨엠):</span>
+              <span className="text-slate-400">{locationShortName('lucciem')}:</span>
               <span className="font-bold text-slate-800">{categoryTotals.special.lucciem}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">세일정밀공업:</span>
+              <span className="text-slate-400">{locationShortName('seil')}:</span>
               <span className="font-bold text-slate-800">{categoryTotals.special.seil}</span>
             </div>
           </div>
@@ -153,7 +160,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="text-[11px] text-blue-100 pt-2 border-t border-blue-500/60 flex items-center justify-between">
             <span>실시간 연동 재고</span>
-            <span className="font-bold">단말기보드 {categoryTotals.terminalBoard}EA</span>
+            <span className="font-bold">{productName('terminal_board')} {categoryTotals.terminalBoard}EA</span>
           </div>
         </div>
       </div>
@@ -250,18 +257,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <thead>
               <tr className="bg-slate-900 text-white font-semibold divide-x divide-slate-800">
                 <th className="px-4 py-3.5 sticky left-0 z-10 bg-slate-900 w-36">거점 (장소)</th>
-                <th className="px-3 py-3.5 text-center bg-blue-900 text-blue-100">Smart 상단</th>
-                <th className="px-3 py-3.5 text-center bg-blue-900 text-blue-100">Smart 하단</th>
-                <th className="px-3 py-3.5 text-center bg-blue-950 text-blue-100">Smart 상단(영문)</th>
-                <th className="px-3 py-3.5 text-center bg-sky-900 text-sky-100">일반 상단</th>
-                <th className="px-3 py-3.5 text-center bg-sky-900 text-sky-100">일반 하단</th>
-                <th className="px-3 py-3.5 text-center bg-indigo-900 text-indigo-100">일반 상단(삼성)</th>
-                <th className="px-3 py-3.5 text-center bg-indigo-900 text-indigo-100">일반 하단(삼성)</th>
-                <th className="px-3 py-3.5 text-center bg-slate-800 text-slate-100">옥외</th>
-                <th className="px-3 py-3.5 text-center bg-slate-800 text-slate-100">이동</th>
-                <th className="px-3 py-3.5 text-center bg-slate-800 text-slate-100">지게가방</th>
-                <th className="px-3 py-3.5 text-center bg-slate-800 text-slate-100">세미아웃도어</th>
-                <th className="px-3 py-3.5 text-center bg-emerald-900 text-emerald-100">단말기보드</th>
+                {PRODUCTS.map((prod) => (
+                  <th
+                    key={prod.id}
+                    className={`px-3 py-3.5 text-center ${
+                      prod.category === 'Smart AED'
+                        ? 'bg-blue-900 text-blue-100'
+                        : prod.category === '일반보관함'
+                          ? 'bg-sky-900 text-sky-100'
+                          : prod.category === '전장부품'
+                            ? 'bg-emerald-900 text-emerald-100'
+                            : 'bg-slate-800 text-slate-100'
+                    }`}
+                  >
+                    {prod.name}
+                  </th>
+                ))}
                 <th className="px-4 py-3.5 bg-slate-950 text-slate-300 min-w-[280px]">
                   비고 (B급, 샘플, 외관상처 등 예외메모)
                 </th>
@@ -373,24 +384,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <td className="px-4 py-4 sticky left-0 z-10 bg-slate-900 text-sm">
                   총계 (보유 재고)
                 </td>
-                <td className="px-3 py-4 text-center font-mono text-sm">{totals.smart_top}</td>
-                <td className="px-3 py-4 text-center font-mono text-sm">{totals.smart_bottom}</td>
-                <td className="px-3 py-4 text-center font-mono text-sm">{totals.smart_top_eng}</td>
-                <td className="px-3 py-4 text-center font-mono text-sm">{totals.std_top}</td>
-                <td className="px-3 py-4 text-center font-mono text-sm">{totals.std_bottom}</td>
-                <td className="px-3 py-4 text-center font-mono text-sm">{totals.std_top_samsung}</td>
-                <td className="px-3 py-4 text-center font-mono text-sm">{totals.std_bottom_samsung}</td>
-                <td className="px-3 py-4 text-center font-mono text-sm">{totals.outdoor}</td>
-                <td className="px-3 py-4 text-center font-mono text-sm">{totals.mobile}</td>
-                <td className="px-3 py-4 text-center font-mono text-sm">{totals.forklift_bag}</td>
-                <td className="px-3 py-4 text-center font-mono text-sm">{totals.semi_outdoor}</td>
-                <td className="px-3 py-4 text-center font-mono text-sm">{totals.terminal_board}</td>
+                {PRODUCTS.map((prod) => (
+                  <td key={prod.id} className="px-3 py-4 text-center font-mono text-sm">
+                    {totals[prod.id] || 0}
+                  </td>
+                ))}
                 <td className="px-4 py-4 text-xs bg-slate-950 text-slate-300">
                   보유 총합:{' '}
                   <span className="text-white font-bold">
                     {categoryTotals.grandTotal}
                     <span className="text-slate-400 font-semibold">
-                      (단말기보드 {categoryTotals.terminalBoard}EA)
+                      ({productName('terminal_board')} {categoryTotals.terminalBoard}EA)
                     </span>
                   </span>
                 </td>

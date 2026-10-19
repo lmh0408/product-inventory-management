@@ -1,4 +1,4 @@
-export type LocationId = 'lucciem' | 'seil' | 'ijin' | 'etc';
+export type LocationId = string;
 
 export interface LocationInfo {
   id: LocationId;
@@ -9,21 +9,9 @@ export interface LocationInfo {
   color: string;
 }
 
-export type ProductId =
-  | 'smart_top'
-  | 'smart_bottom'
-  | 'smart_top_eng'
-  | 'std_top'
-  | 'std_bottom'
-  | 'std_top_samsung'
-  | 'std_bottom_samsung'
-  | 'outdoor'
-  | 'mobile'
-  | 'forklift_bag'
-  | 'semi_outdoor'
-  | 'terminal_board';
+export type ProductId = string;
 
-export type ProductCategory = 'Smart AED' | '일반보관함' | '옥외/이동/특수' | '전장부품';
+export type ProductCategory = string;
 
 export interface ProductInfo {
   id: ProductId;
@@ -138,6 +126,35 @@ export interface SheetConfig {
   lastError?: string | null;
   isConnected?: boolean;
   importedTabs?: string[];
+}
+
+export interface ProductMaster {
+  id: ProductId;
+  name: string;
+  unit: string;
+  unitCostEstimate: number;
+  category: ProductCategory;
+}
+
+export interface LocationMaster {
+  id: LocationId;
+  name: string;
+  shortName: string;
+  description: string;
+  /** Ledger tab name. Stays stable when the display name changes. */
+  sheetName: string;
+}
+
+export interface CategoryMaster {
+  id: ProductCategory;
+  label: string;
+}
+
+export interface MasterData {
+  products: ProductMaster[];
+  locations: LocationMaster[];
+  categories: CategoryMaster[];
+  suppliers: string[];
 }
 
 export interface StockAlert {

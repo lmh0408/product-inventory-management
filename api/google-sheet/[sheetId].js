@@ -23,6 +23,231 @@ __export(sheetId_exports, {
 });
 module.exports = __toCommonJS(sheetId_exports);
 
+// src/data/initialData.ts
+var LOCATIONS = [
+  {
+    id: "lucciem",
+    name: "\uB8E8\uC528\uC5E0 (\uBCF8\uC0AC/\uC0AC\uBB34\uC2E4)",
+    shortName: "\uB8E8\uC528\uC5E0",
+    type: "headquarter",
+    description: "\uBCF8\uC0AC \uC7AC\uACE0 \uBC0F \uCD9C\uACE0/\uB0A9\uD488 \uAC70\uC810",
+    color: "emerald"
+  },
+  {
+    id: "seil",
+    name: "\uC138\uC77C\uC815\uBC00\uACF5\uC5C5 (\uC81C\uC791/\uBCF4\uAD00)",
+    shortName: "\uC138\uC77C\uC815\uBC00\uACF5\uC5C5",
+    type: "manufacturing",
+    description: "\uCF00\uC774\uC2A4 \uC81C\uC791 \uBC0F \uBA54\uC778 \uBCF4\uAD00 \uAC70\uC810",
+    color: "indigo"
+  },
+  {
+    id: "ijin",
+    name: "\uC544\uC774\uC9C4 (\uD611\uB825\uC0AC)",
+    shortName: "\uC544\uC774\uC9C4",
+    type: "partner",
+    description: "\uBCF4\uAD00\uD568 \uC81C\uC791 \uD611\uB825 \uAC70\uC810",
+    color: "amber"
+  },
+  {
+    id: "etc",
+    name: "ETC",
+    shortName: "ETC",
+    type: "partner",
+    description: "\uAE30\uD0C0 \uC7AC\uACE0 \uAD00\uB9AC \uAC70\uC810",
+    color: "blue"
+  }
+];
+var PRODUCTS = [
+  {
+    id: "smart_top",
+    name: "Smart \uC0C1\uB2E8",
+    category: "Smart AED",
+    unit: "",
+    defaultSupplier: "seil",
+    defaultMinThreshold: 20,
+    moq: 20,
+    unitCostEstimate: 14e4,
+    description: "Smart AED \uBCF4\uAD00\uD568 \uC0C1\uB2E8 \uD30C\uD2B8 (IoT \uBAA8\uB4C8 \uBC0F \uC804\uC7A5 \uACB0\uD569 \uC870\uB9BD \uD544\uC694)",
+    requiresAssembly: true
+  },
+  {
+    id: "smart_bottom",
+    name: "Smart \uD558\uB2E8",
+    category: "Smart AED",
+    unit: "",
+    defaultSupplier: "seil",
+    defaultMinThreshold: 20,
+    moq: 20,
+    unitCostEstimate: 12e4,
+    description: "Smart AED \uBCF4\uAD00\uD568 \uD558\uB2E8 \uC2A4\uD0E0\uB4DC \uD30C\uD2B8",
+    requiresAssembly: false
+  },
+  {
+    id: "smart_top_eng",
+    name: "Smart \uC0C1\uB2E8(\uC601\uBB38)",
+    category: "Smart AED",
+    unit: "",
+    defaultSupplier: "seil",
+    defaultMinThreshold: 5,
+    moq: 10,
+    unitCostEstimate: 145e3,
+    description: "\uD574\uC678/\uD2B9\uC218 \uC218\uCD9C\uC6A9 \uC601\uBB38 \uD45C\uAE30 \uC2A4\uB9C8\uD2B8 \uC0C1\uB2E8 (\uCD94\uAC00 \uC870\uB9BD \uD544\uC694)",
+    requiresAssembly: true
+  },
+  {
+    id: "std_top",
+    name: "\uC77C\uBC18 \uC0C1\uB2E8",
+    category: "\uC77C\uBC18\uBCF4\uAD00\uD568",
+    unit: "",
+    defaultSupplier: "seil",
+    defaultMinThreshold: 5,
+    moq: 10,
+    unitCostEstimate: 95e3,
+    description: "\uD45C\uC900\uD615 \uC77C\uBC18\uBCF4\uAD00\uD568 \uC0C1\uB2E8 (\uB3C4\uC5B4 \uBC0F \uAE30\uAD6C \uC870\uB9BD \uD544\uC694)",
+    requiresAssembly: true
+  },
+  {
+    id: "std_bottom",
+    name: "\uC77C\uBC18 \uD558\uB2E8",
+    category: "\uC77C\uBC18\uBCF4\uAD00\uD568",
+    unit: "",
+    defaultSupplier: "seil",
+    defaultMinThreshold: 10,
+    moq: 10,
+    unitCostEstimate: 85e3,
+    description: "\uD45C\uC900\uD615 \uC77C\uBC18\uBCF4\uAD00\uD568 \uD558\uB2E8",
+    requiresAssembly: false
+  },
+  {
+    id: "std_top_samsung",
+    name: "\uC77C\uBC18 \uC0C1\uB2E8(\uC0BC\uC131)",
+    category: "\uC77C\uBC18\uBCF4\uAD00\uD568",
+    unit: "",
+    defaultSupplier: "seil",
+    defaultMinThreshold: 15,
+    moq: 20,
+    unitCostEstimate: 11e4,
+    description: "\uC0BC\uC131\uC804\uC790 \uB0A9\uD488\uC6A9 \uD2B9\uD654 \uADDC\uACA9 \uC77C\uBC18 \uC0C1\uB2E8 (\uCD94\uAC00 \uC870\uB9BD \uD544\uC694)",
+    requiresAssembly: true
+  },
+  {
+    id: "std_bottom_samsung",
+    name: "\uC77C\uBC18 \uD558\uB2E8(\uC0BC\uC131)",
+    category: "\uC77C\uBC18\uBCF4\uAD00\uD568",
+    unit: "",
+    defaultSupplier: "seil",
+    defaultMinThreshold: 15,
+    moq: 20,
+    unitCostEstimate: 98e3,
+    description: "\uC0BC\uC131\uC804\uC790 \uB0A9\uD488\uC6A9 \uD2B9\uD654 \uADDC\uACA9 \uC77C\uBC18 \uD558\uB2E8",
+    requiresAssembly: false
+  },
+  {
+    id: "outdoor",
+    name: "\uC625\uC678",
+    category: "\uC625\uC678/\uC774\uB3D9/\uD2B9\uC218",
+    unit: "",
+    defaultSupplier: "seil",
+    defaultMinThreshold: 5,
+    moq: 5,
+    unitCostEstimate: 28e4,
+    description: "\uBC29\uC218/\uBC29\uC9C4/\uD56D\uC628 \uBC0F \uC81C\uC5B4\uBCF4\uB4DC \uD0D1\uC7AC \uC625\uC678 \uC124\uCE58\uD615 \uBCF4\uAD00\uD568 (\uCD94\uAC00 \uC870\uB9BD \uD544\uC694)",
+    requiresAssembly: true
+  },
+  {
+    id: "mobile",
+    name: "\uC774\uB3D9",
+    category: "\uC625\uC678/\uC774\uB3D9/\uD2B9\uC218",
+    unit: "",
+    defaultSupplier: "seil",
+    defaultMinThreshold: 15,
+    moq: 20,
+    unitCostEstimate: 16e4,
+    description: "\uCC28\uB7C9 \uBC0F \uC774\uB3D9\uC2DD \uBC30\uCE58 \uC804\uC6A9 \uBCF4\uAD00\uD568 (\uB0B4\uBD80 \uC644\uCDA9\uC7AC \uBC0F \uCCB4\uACB0 \uC870\uB9BD \uD544\uC694)",
+    requiresAssembly: true
+  },
+  {
+    id: "forklift_bag",
+    name: "\uC9C0\uAC8C\uAC00\uBC29",
+    category: "\uC625\uC678/\uC774\uB3D9/\uD2B9\uC218",
+    unit: "",
+    defaultSupplier: "seil",
+    defaultMinThreshold: 10,
+    moq: 15,
+    unitCostEstimate: 65e3,
+    description: "\uD734\uB300\uC6A9 \uBC0F \uBE44\uC0C1 \uC9C0\uAC8C\uD615 \uCE90\uB9C1 \uBC31",
+    requiresAssembly: false
+  },
+  {
+    id: "semi_outdoor",
+    name: "\uC138\uBBF8\uC544\uC6C3\uB3C4\uC5B4",
+    category: "\uC625\uC678/\uC774\uB3D9/\uD2B9\uC218",
+    unit: "",
+    defaultSupplier: "seil",
+    defaultMinThreshold: 5,
+    moq: 5,
+    unitCostEstimate: 21e4,
+    description: "\uCE90\uB178\uD53C/\uBC18\uC57C\uC678 \uC124\uCE58\uC6A9 \uC900\uC625\uC678 \uBCF4\uAD00\uD568",
+    requiresAssembly: false
+  },
+  {
+    id: "terminal_board",
+    name: "\uB2E8\uB9D0\uAE30\uBCF4\uB4DC",
+    category: "\uC804\uC7A5\uBD80\uD488",
+    unit: "EA",
+    defaultSupplier: "smt",
+    defaultMinThreshold: 30,
+    moq: 50,
+    unitCostEstimate: 45e3,
+    description: "\uC2A4\uB9C8\uD2B8 \uBCF4\uAD00\uD568 \uB0B4\uC7A5 IoT \uC81C\uC5B4 \uB2E8\uB9D0\uAE30 \uBA54\uC778 PCB (\uC0C1\uB2E8 \uBC0F \uC625\uC678 \uC870\uB9BD \uC2DC \uD22C\uC785)",
+    requiresAssembly: false
+  }
+];
+
+// src/data/masterData.ts
+var BUILTIN_LEDGER_SHEET_NAMES = {
+  lucciem: "\uB8E8\uC528\uC5E0-\uC624\uB984\uCC28\uC21C",
+  seil: "\uC138\uC77C\uC815\uBC00\uACF5\uC5C5-\uC624\uB984\uCC28\uC21C",
+  ijin: "\uC544\uC774\uC9C4-\uC624\uB984\uCC28\uC21C",
+  etc: "etc-\uC624\uB984\uCC28\uC21C"
+};
+var PRODUCT_CATEGORIES = [
+  "Smart AED",
+  "\uC77C\uBC18\uBCF4\uAD00\uD568",
+  "\uC625\uC678/\uC774\uB3D9/\uD2B9\uC218",
+  "\uC804\uC7A5\uBD80\uD488"
+];
+var DEFAULT_CATEGORY_LABELS = {
+  "Smart AED": "Smart AED",
+  \uC77C\uBC18\uBCF4\uAD00\uD568: "\uC77C\uBC18\uBCF4\uAD00\uD568",
+  "\uC625\uC678/\uC774\uB3D9/\uD2B9\uC218": "\uC625\uC678 / \uC774\uB3D9 / \uD2B9\uC218",
+  \uC804\uC7A5\uBD80\uD488: "\uC804\uC7A5\uBD80\uD488"
+};
+var DEFAULT_PRODUCTS = PRODUCTS.map((product) => ({
+  id: product.id,
+  name: product.name,
+  unit: product.unit,
+  unitCostEstimate: product.unitCostEstimate,
+  category: product.category
+}));
+var DEFAULT_LOCATIONS = LOCATIONS.map((location) => ({
+  id: location.id,
+  name: location.name,
+  shortName: location.shortName,
+  description: location.description,
+  sheetName: BUILTIN_LEDGER_SHEET_NAMES[location.id] || `${location.shortName}-\uC624\uB984\uCC28\uC21C`
+}));
+var DEFAULT_MASTER_DATA = {
+  products: DEFAULT_PRODUCTS,
+  locations: DEFAULT_LOCATIONS,
+  categories: PRODUCT_CATEGORIES.map((id) => ({ id, label: DEFAULT_CATEGORY_LABELS[id] })),
+  suppliers: ["\uC138\uC77C\uC815\uBC00\uACF5\uC5C5", "\uC544\uC774\uC9C4", "SMT"]
+};
+var activeCategoryLabels = { ...DEFAULT_CATEGORY_LABELS };
+var activeSuppliers = [...DEFAULT_MASTER_DATA.suppliers];
+var activeLedgerNames = { ...BUILTIN_LEDGER_SHEET_NAMES };
+
 // server/googleSheetProxy.ts
 var SHEET_ID_PATTERN = /^[a-zA-Z0-9-_]{20,}$/;
 function buildFreshExportUrl(sheetId) {

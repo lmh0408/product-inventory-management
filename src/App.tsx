@@ -7,6 +7,7 @@ import {
   SheetConfig,
   LocationId,
   ProductId,
+  MasterData,
 } from './types';
 import {
   INITIAL_LOCATION_STOCKS,
@@ -33,8 +34,15 @@ import {
   normalizeAppsScriptWebhook,
   saveAppDataToSheet,
   saveDashboardRemark,
+  saveMasterDataToSheet,
   saveMovementToSheet,
 } from './utils/googleSheetWrite';
+import {
+  DEFAULT_MASTER_DATA,
+  alignStocksWithMaster,
+  applyMasterData,
+  normalizeMasterData,
+} from './data/masterData';
 
 import { Header, NavTab } from './components/Header';
 import { DashboardView } from './components/DashboardView';
@@ -45,6 +53,8 @@ import { AssemblyModal } from './components/AssemblyModal';
 import { GoogleSheetSyncModal } from './components/GoogleSheetSyncModal';
 import { PurchaseOrderModal } from './components/PurchaseOrderModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
+
+const MASTER_DATA_STORAGE_KEY = 'lucm_master_data_v1';
 
 function sortMovementsAscending(items: StockMovement[]): StockMovement[] {
   return [...items].sort((a, b) =>
@@ -269,6 +279,39 @@ export default function App() {
   const sheetConfigRef = useRef(sheetConfig);
   sheetConfigRef.current = sheetConfig;
 
+  const [masterData, setMasterData] = useState<MasterData>(() => {
+    const saved = localStorage.getItem(MASTER_DATA_STORAGE_KEY);
+    let initial = DEFAULT_MASTER_DATA;
+    if (saved) {
+      try {
+        initial = normalizeMasterData(JSON.parse(saved));
+      } catch {
+        initial = DEFAULT_MASTER_DATA;
+      }
+    }
+    applyMasterData(initial);
+    return initial;
+  });
+
+  const commitMasterData = useCallback((next: MasterData) => {
+    applyMasterData(next);
+    setMasterData(next);
+    setStocks((prev) => alignStocksWithMaster(prev, next));
+    setThresholds((prev) =>
+      prev.filter(
+        (rule) =>
+          next.products.some((product) => product.id === rule.productId) &&
+          (rule.locationId == null ||
+            rule.locationId === 'ALL' ||
+            next.locations.some((location) => location.id === rule.locationId))
+      )
+    );
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(MASTER_DATA_STORAGE_KEY, JSON.stringify(masterData));
+  }, [masterData]);
+
   useEffect(() => {
     if (sheetConfig.lastError && /이전 버전|새 버전으로 재배포/.test(sheetConfig.lastError)) {
       setSheetConfig((prev) => ({ ...prev, lastError: null }));
@@ -308,7 +351,11 @@ export default function App() {
     () => Object.values(unassembledTotals).reduce<number>((sum, q) => sum + (typeof q === 'number' ? q : 0), 0),
     [unassembledTotals]
   );
-  const alerts = useMemo(() => detectStockAlerts(stocks, thresholds), [stocks, thresholds]);
+  const alerts = useMemo(
+    () => detectStockAlerts(stocks, thresholds),
+    // masterData changes product names shown in alerts.
+    [stocks, thresholds, masterData]
+  );
   const activeOrdersCount = useMemo(
     () => purchaseOrders.filter((po) => po.status !== 'COMPLETED' && po.status !== 'CANCELLED').length,
     [purchaseOrders]
@@ -360,6 +407,7 @@ export default function App() {
       const syncPromise = (async (): Promise<boolean> => {
         try {
           const result = await importGoogleSheet(sheetId);
+          if (result.masterData) commitMasterData(result.masterData);
           setStocks(result.stocks);
           setMovements(sortMovementsAscending(result.movements));
           const now = new Date();
@@ -397,8 +445,47 @@ export default function App() {
       inFlightSyncPromiseRef.current = syncPromise;
       return syncPromise;
     },
-    []
+    [commitMasterData]
   );
+
+  const handleSaveMasterData = async (
+    next: MasterData
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (isMutatingRef.current) {
+      return { ok: false, error: '다른 변경 작업이 처리 중입니다. 잠시 후 다시 시도해 주세요.' };
+    }
+    const webhookUrl = normalizeAppsScriptWebhook(sheetConfigRef.current.webhookUrl || '');
+    if (!webhookUrl || !sheetConfigRef.current.sheetId) {
+      return {
+        ok: false,
+        error: '구글 시트 연동 설정에서 시트 URL과 저장용 웹앱 URL을 먼저 등록해 주세요.',
+      };
+    }
+    const normalized = normalizeMasterData(next);
+    isMutatingRef.current = true;
+    try {
+      await saveMasterDataToSheet({
+        webhookUrl,
+        sheetId: sheetConfigRef.current.sheetId,
+        masterData: normalized,
+        previous: masterData,
+      });
+      commitMasterData(normalized);
+      setSheetConfig((prev) => ({
+        ...prev,
+        lastSavedAt: new Date().toLocaleString('ko-KR'),
+        lastError: null,
+      }));
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : '마스터 데이터를 시트에 저장하지 못했습니다.',
+      };
+    } finally {
+      isMutatingRef.current = false;
+    }
+  };
 
   // Handlers
   const handleSaveMovement = async (
@@ -1120,6 +1207,8 @@ export default function App() {
         onClose={() => setIsSheetSyncModalOpen(false)}
         config={sheetConfig}
         onUpdateConfig={(cfg) => setSheetConfig((prev) => ({ ...prev, ...cfg }))}
+        masterData={masterData}
+        onSaveMasterData={handleSaveMasterData}
       />
 
       <PurchaseOrderModal

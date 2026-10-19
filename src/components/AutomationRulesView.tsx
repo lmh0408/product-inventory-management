@@ -7,6 +7,7 @@ import {
   ProductId,
 } from '../types';
 import { PRODUCTS } from '../data/initialData';
+import { getSuppliers } from '../data/masterData';
 import { calculateProductTotals, formatCurrencyKRW } from '../utils/stockUtils';
 import {
   Sliders,
@@ -52,6 +53,9 @@ export const AutomationRulesView: React.FC<AutomationRulesViewProps> = ({
   const [poFilter, setPoFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED'>('ALL');
 
   const totals = calculateProductTotals(stocks);
+  const suppliers = getSuppliers();
+  const supplierOptions =
+    tempSupplier && !suppliers.includes(tempSupplier) ? [tempSupplier, ...suppliers] : suppliers;
 
   const handleStartEdit = (rule: ThresholdRule) => {
     setEditingRuleProductId(rule.productId);
@@ -255,9 +259,11 @@ export const AutomationRulesView: React.FC<AutomationRulesViewProps> = ({
                             onChange={(e) => setTempSupplier(e.target.value)}
                             className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-0.5 text-xs font-bold text-white"
                           >
-                            <option value="세일정밀공업">세일정밀공업</option>
-                            <option value="아이진">아이진</option>
-                            <option value="SMT">SMT</option>
+                            {supplierOptions.map((name) => (
+                              <option key={name} value={name}>
+                                {name}
+                              </option>
+                            ))}
                           </select>
                         ) : (
                           <span className="text-slate-300 font-semibold">{supplier}</span>
