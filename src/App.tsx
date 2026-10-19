@@ -1103,7 +1103,10 @@ export default function App() {
       <Header
         activeTab={activeTab}
         setActiveTab={handleSelectTab}
+        sheetConfig={sheetConfig}
         onOpenSheetSyncModal={() => setIsSheetSyncModalOpen(true)}
+        onSaveToSheet={handlePersistAppToSheet}
+        onLoadFromSheet={() => handleRequestLoadFromSheet()}
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden pt-6">
@@ -1145,8 +1148,6 @@ export default function App() {
               setIsMovementModalOpen(true);
             }}
             onExportCSV={handleExportCSV}
-            onTriggerSync={handleRequestLoadFromSheet}
-            onPersistToSheet={handlePersistAppToSheet}
             onUpdateWebhook={(url) => {
               const webhookUrl = normalizeAppsScriptWebhook(url);
               sheetConfigRef.current = { ...sheetConfigRef.current, webhookUrl };

@@ -1,18 +1,28 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard,
   ArrowLeftRight,
   ClipboardList,
-  FileSpreadsheet,
   Settings,
+  Upload,
+  Download,
+  ExternalLink,
+  Loader2,
+  CheckCircle2,
 } from 'lucide-react';
+import { SheetConfig } from '../types';
+import { toSheetUrl } from '../utils/googleSheetSync';
+import { ElapsedTime } from './ElapsedTime';
 
 export type NavTab = 'dashboard' | 'movements' | 'automation';
 
 interface HeaderProps {
   activeTab: NavTab;
   setActiveTab: (tab: NavTab) => void;
+  sheetConfig: SheetConfig;
   onOpenSheetSyncModal: () => void;
+  onSaveToSheet: () => Promise<boolean>;
+  onLoadFromSheet: () => Promise<boolean>;
 }
 
 const NAV_ITEMS: {
@@ -46,8 +56,45 @@ const NAV_ITEMS: {
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
+  sheetConfig,
   onOpenSheetSyncModal,
+  onSaveToSheet,
+  onLoadFromSheet,
 }) => {
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const isBusy = isSaving || isLoading || sheetConfig.isSyncing;
+  const sheetUrl = sheetConfig.sheetId ? toSheetUrl(sheetConfig.sheetId) : '';
+
+  const flashToast = (message: string) => {
+    setToast(message);
+    window.setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleSave = async () => {
+    if (isBusy) return;
+    setIsSaving(true);
+    try {
+      if (await onSaveToSheet()) flashToast('앱 데이터를 원장 시트에 저장했습니다.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleLoad = async () => {
+    if (isBusy) return;
+    setIsLoading(true);
+    try {
+      if (await onLoadFromSheet()) flashToast('원장 시트에서 최신 데이터를 불러왔습니다.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const actionClass =
+    'flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors disabled:opacity-60 disabled:cursor-not-allowed';
+
   return (
     <header
       id="app-main-header"
@@ -105,19 +152,81 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </nav>
 
-        <div className="flex items-center justify-end gap-1.5 shrink-0">
+        <div className="flex items-center justify-end gap-1 sm:gap-1.5 shrink-0 overflow-x-auto">
+          <button
+            id="btn-save-to-sheet"
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={isBusy}
+            title="앱의 재고·입출고 내역을 원장 시트에 저장"
+            className={`${actionClass} text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200`}
+          >
+            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            <span>저장</span>
+          </button>
+          <button
+            id="btn-load-from-sheet"
+            type="button"
+            onClick={() => void handleLoad()}
+            disabled={isBusy}
+            title="원장 시트의 최신 데이터를 앱으로 불러오기"
+            className={`${actionClass} text-slate-700 bg-white hover:bg-slate-50 border border-slate-200`}
+          >
+            {isLoading || sheetConfig.isSyncing ? (
+              <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
+            ) : (
+              <Download className="w-4 h-4 text-slate-500" />
+            )}
+            <span>불러오기</span>
+            {typeof sheetConfig.lastSyncedAtMs === 'number' && (
+              <ElapsedTime
+                since={sheetConfig.lastSyncedAtMs}
+                className="hidden sm:inline ml-1 pl-2 border-l border-slate-200 font-medium text-slate-400 tabular-nums"
+              />
+            )}
+          </button>
+          {sheetUrl ? (
+            <a
+              id="btn-open-google-sheet"
+              href={sheetUrl}
+              target="_blank"
+              rel="noreferrer"
+              title="원장 구글 시트 열기"
+              className={`${actionClass} text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200`}
+            >
+              <ExternalLink className="w-4 h-4" />
+              <span>시트 열기</span>
+            </a>
+          ) : (
+            <button
+              id="btn-open-google-sheet"
+              type="button"
+              disabled
+              title="연결된 시트가 없습니다"
+              className={`${actionClass} text-emerald-700 bg-emerald-50 border border-emerald-200`}
+            >
+              <ExternalLink className="w-4 h-4" />
+              <span>시트 열기</span>
+            </button>
+          )}
           <button
             id="nav-link-sheet-settings"
             type="button"
             onClick={onOpenSheetSyncModal}
-            title="시트 설정"
-            className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+            title="설정"
+            className={`${actionClass} text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200`}
           >
             <Settings className="w-4 h-4" />
+            <span>설정</span>
           </button>
         </div>
       </div>
-
+      {toast && (
+        <div className="fixed top-16 right-4 z-50 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-bold">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          <span>{toast}</span>
+        </div>
+      )}
     </header>
   );
 };
