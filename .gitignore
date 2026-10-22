@@ -9,4 +9,5 @@ coverage/
 !.env.example
 /api/package-lock.json
 .vercel
+/public/assets/aistudio/
 

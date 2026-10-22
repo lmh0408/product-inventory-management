@@ -1,7 +1,9 @@
 // server/app.ts
+import fs from "node:fs";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ZipArchive } from "archiver";
 
 // server/googleSheetProxy.ts
 import * as XLSX5 from "xlsx";
@@ -1610,15 +1612,81 @@ function exportErrorResult(error) {
 // server/app.ts
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
-var rootDir = path.resolve(__dirname, "..");
-var isProduction = process.env.NODE_ENV === "production";
-var PORT = Number(process.env.PORT) || 3e3;
-var HOST = "0.0.0.0";
+function getProjectRootDir() {
+  const candidates = [
+    process.cwd(),
+    path.resolve(__dirname),
+    path.resolve(__dirname, "..")
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, "package.json"))) {
+      return dir;
+    }
+  }
+  return process.cwd();
+}
+function getDistPath() {
+  const candidates = [
+    path.resolve(process.cwd(), "dist"),
+    path.resolve(__dirname, "dist"),
+    path.resolve(__dirname, "..", "dist")
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, "index.html"))) {
+      return candidate;
+    }
+  }
+  return fs.existsSync(path.resolve(__dirname, "dist")) ? path.resolve(__dirname, "dist") : path.resolve(process.cwd(), "dist");
+}
 async function createServer() {
+  const isProduction = process.env.NODE_ENV === "production";
+  const port = Number(process.env.PORT) || 3e3;
+  const host = "0.0.0.0";
   const app = express();
   app.use(express.json({ limit: "15mb" }));
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, timestamp: Date.now() });
+  });
+  app.get("/api/download-source", async (_req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    try {
+      const projectRoot = getProjectRootDir();
+      const dateStr = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10).replace(/-/g, "");
+      const filename = `product-inventory-management-src-${dateStr}.zip`;
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      const archive = new ZipArchive({
+        zlib: { level: 9 }
+      });
+      archive.on("error", (err) => {
+        console.error("[Download Source] Archive error:", err);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "\uC18C\uC2A4 \uCF54\uB4DC \uC555\uCD95 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4." });
+        }
+      });
+      archive.pipe(res);
+      archive.glob("**/*", {
+        cwd: projectRoot,
+        ignore: [
+          "node_modules/**",
+          "dist/**",
+          ".git/**",
+          ".aistudio/**",
+          "server.prod.mjs",
+          "**/*.log",
+          ".DS_Store"
+        ],
+        dot: true
+      });
+      await archive.finalize();
+    } catch (error) {
+      console.error("[Download Source] Fatal error:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "\uC18C\uC2A4 \uCF54\uB4DC \uB2E4\uC6B4\uB85C\uB4DC \uC0DD\uC131\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4." });
+      }
+    }
   });
   app.post("/api/google-sheet-save", async (req, res) => {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -1651,26 +1719,38 @@ async function createServer() {
       res.status(result.status).json(result.json);
     }
   });
-  if (!isProduction) {
+  const distPath = getDistPath();
+  const isDev = !isProduction && process.env.npm_lifecycle_event === "dev";
+  if (isDev) {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      server: { middlewareMode: true, host: HOST, port: PORT },
+      server: { middlewareMode: true, host, port },
       appType: "spa"
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.resolve(rootDir, "dist");
+    console.log(`[Server] Production mode: serving static files from ${distPath}`);
     app.use(express.static(distPath));
     app.get("*", (_req, res) => {
-      res.sendFile(path.resolve(distPath, "index.html"));
+      const indexPath = path.resolve(distPath, "index.html");
+      res.sendFile(indexPath, (err) => {
+        if (err && !res.headersSent) {
+          console.error("[Server] Failed to send index.html from path:", indexPath, err);
+          res.status(500).send("Application Error: unable to serve static index.html");
+        }
+      });
     });
   }
-  return { app, port: PORT, host: HOST };
+  return { app, port, host };
 }
 async function startServer() {
   const { app, port, host } = await createServer();
-  app.listen(port, host, () => {
-    console.log(`[Server] Running on http://${host}:${port} (mode: ${isProduction ? "production" : "development"})`);
+  const isProduction = process.env.NODE_ENV === "production";
+  return new Promise((resolve) => {
+    app.listen(port, host, () => {
+      console.log(`[Server] Running on http://${host}:${port} (mode: ${isProduction ? "production" : "development"})`);
+      resolve(app);
+    });
   });
 }
 var isDirectCli = process.argv[1] && import.meta.url.endsWith(path.basename(process.argv[1]));

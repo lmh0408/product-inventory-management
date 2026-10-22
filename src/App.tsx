@@ -471,9 +471,11 @@ export default function App() {
         previous: masterData,
       });
       commitMasterData(normalized);
+      const savedAtMs = Date.now();
       setSheetConfig((prev) => ({
         ...prev,
-        lastSavedAt: new Date().toLocaleString('ko-KR'),
+        lastSavedAt: new Date(savedAtMs).toLocaleString('ko-KR'),
+        lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
       return { ok: true };
@@ -551,9 +553,11 @@ export default function App() {
       setMovements((prev) =>
         sortMovementsAscending([...prev, ...syncedMovements])
       );
+      const savedAtMs = Date.now();
       setSheetConfig((prev) => ({
         ...prev,
-        lastSavedAt: new Date().toLocaleString('ko-KR'),
+        lastSavedAt: new Date(savedAtMs).toLocaleString('ko-KR'),
+        lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
       void handleTriggerSync(undefined, { force: true, silent: true });
@@ -660,9 +664,11 @@ export default function App() {
       }));
       setStocks(result.stocks || updatedStocks);
       setMovements(syncedMovements);
+      const savedAtMs = Date.now();
       setSheetConfig((prev) => ({
         ...prev,
-        lastSavedAt: new Date().toLocaleString('ko-KR'),
+        lastSavedAt: new Date(savedAtMs).toLocaleString('ko-KR'),
+        lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
       void handleTriggerSync(undefined, { force: true, silent: true });
@@ -698,9 +704,11 @@ export default function App() {
           stock.locationId === locationId ? { ...stock, remarks } : stock
         )
       );
+      const savedAtMs = Date.now();
       setSheetConfig((prev) => ({
         ...prev,
-        lastSavedAt: new Date().toLocaleString('ko-KR'),
+        lastSavedAt: new Date(savedAtMs).toLocaleString('ko-KR'),
+        lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
       void handleTriggerSync(undefined, { force: true, silent: true });
@@ -748,9 +756,11 @@ export default function App() {
           }))
         );
       }
+      const savedAtMs = Date.now();
       setSheetConfig((prev) => ({
         ...prev,
-        lastSavedAt: new Date().toLocaleString('ko-KR'),
+        lastSavedAt: new Date(savedAtMs).toLocaleString('ko-KR'),
+        lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
       void handleTriggerSync(undefined, { force: true, silent: true });
@@ -822,9 +832,11 @@ export default function App() {
         );
       }
       setMovements((prev) => prev.filter((movement) => !movementIds.includes(movement.id)));
+      const savedAtMs = Date.now();
       setSheetConfig((prev) => ({
         ...prev,
-        lastSavedAt: new Date().toLocaleString('ko-KR'),
+        lastSavedAt: new Date(savedAtMs).toLocaleString('ko-KR'),
+        lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
       void handleTriggerSync(undefined, { force: true, silent: true });
@@ -883,9 +895,11 @@ export default function App() {
           },
         ])
       );
+      const savedAtMs = Date.now();
       setSheetConfig((prev) => ({
         ...prev,
-        lastSavedAt: new Date().toLocaleString('ko-KR'),
+        lastSavedAt: new Date(savedAtMs).toLocaleString('ko-KR'),
+        lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
       void handleTriggerSync(undefined, { force: true, silent: true });

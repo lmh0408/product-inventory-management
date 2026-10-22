@@ -121,6 +121,7 @@ export interface SheetConfig {
   lastSyncedAt: string | null;
   lastSyncedAtMs?: number;
   lastSavedAt: string | null;
+  lastSavedAtMs?: number;
   isSyncing: boolean;
   syncMode: 'TWO_WAY' | 'PULL_ONLY' | 'PUSH_ONLY';
   lastError?: string | null;

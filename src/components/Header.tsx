@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Loader2,
   CheckCircle2,
+  FileDown,
 } from 'lucide-react';
 import { SheetConfig } from '../types';
 import { toSheetUrl } from '../utils/googleSheetSync';
@@ -92,6 +93,41 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
+  const [isDownloadingSource, setIsDownloadingSource] = useState(false);
+
+  const handleDownloadSource = async () => {
+    if (isDownloadingSource) return;
+    setIsDownloadingSource(true);
+    try {
+      const response = await fetch('/api/download-source');
+      if (!response.ok) {
+        throw new Error('소스 코드 다운로드에 실패했습니다.');
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get('Content-Disposition');
+      let filename = 'product-inventory-management-source.zip';
+      if (disposition) {
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        if (match?.[1]) filename = match[1];
+      }
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(downloadUrl);
+      flashToast('소스 코드(.zip) 다운로드를 완료했습니다.');
+    } catch (error) {
+      flashToast(
+        error instanceof Error ? error.message : '소스 다운로드 중 오류가 발생했습니다.'
+      );
+    } finally {
+      setIsDownloadingSource(false);
+    }
+  };
+
   const actionClass =
     'flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors disabled:opacity-60 disabled:cursor-not-allowed';
 
@@ -163,6 +199,12 @@ export const Header: React.FC<HeaderProps> = ({
           >
             {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
             <span>저장</span>
+            {typeof sheetConfig.lastSavedAtMs === 'number' && (
+              <ElapsedTime
+                since={sheetConfig.lastSavedAtMs}
+                className="hidden sm:inline ml-1 pl-2 border-l border-blue-200 font-medium text-blue-600 tabular-nums"
+              />
+            )}
           </button>
           <button
             id="btn-load-from-sheet"
@@ -209,6 +251,21 @@ export const Header: React.FC<HeaderProps> = ({
               <span>시트 열기</span>
             </button>
           )}
+          <button
+            id="btn-download-source"
+            type="button"
+            onClick={() => void handleDownloadSource()}
+            disabled={isDownloadingSource}
+            title="현재 앱의 소스 코드를 zip 파일로 다운로드"
+            className={`${actionClass} text-slate-700 bg-white hover:bg-slate-50 border border-slate-200`}
+          >
+            {isDownloadingSource ? (
+              <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
+            ) : (
+              <FileDown className="w-4 h-4 text-slate-600" />
+            )}
+            <span>소스 받기</span>
+          </button>
           <button
             id="nav-link-sheet-settings"
             type="button"
