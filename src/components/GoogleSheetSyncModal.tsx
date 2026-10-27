@@ -1,23 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { MasterData, SheetConfig } from '../types';
-import { extractSheetId, toSheetUrl } from '../utils/googleSheetSync';
+import { extractSheetId } from '../utils/googleSheetSync';
 import {
   X,
   FileSpreadsheet,
-  ExternalLink,
-  AlertCircle,
-  CheckCircle2,
   SlidersHorizontal,
   Database,
   RotateCcw,
   Check,
   Loader2,
+  FileDown,
 } from 'lucide-react';
 import { CopyAppsScriptButton } from './CopyAppsScriptButton';
 import { MasterDataPanel } from './MasterDataPanel';
 import { DEFAULT_MASTER_DATA, cloneMasterData, isSameMasterData } from '../data/masterData';
 
-type SettingsTab = 'master' | 'sheet';
+type SettingsTab = 'master' | 'sheet' | 'source';
 
 interface GoogleSheetSyncModalProps {
   isOpen: boolean;
@@ -28,6 +26,9 @@ interface GoogleSheetSyncModalProps {
   onSaveMasterData: (next: MasterData) => Promise<{ ok: boolean; error?: string }>;
 }
 
+const inputClass =
+  'w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-800 font-medium font-mono outline-none focus:border-slate-400';
+
 export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
   isOpen,
   onClose,
@@ -37,24 +38,28 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
   onSaveMasterData,
 }) => {
   const [draftUrl, setDraftUrl] = useState(config.sheetUrl || config.sheetId || '');
+  const [draftWebhook, setDraftWebhook] = useState(config.webhookUrl || '');
   const [activeTab, setActiveTab] = useState<SettingsTab>('master');
   const [masterDraft, setMasterDraft] = useState<MasterData>(() => cloneMasterData(masterData));
   const [isSavingMaster, setIsSavingMaster] = useState(false);
   const [masterError, setMasterError] = useState<string | null>(null);
+  const [isDownloadingSource, setIsDownloadingSource] = useState(false);
+  const [sourceMessage, setSourceMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setDraftUrl(config.sheetUrl || config.sheetId || '');
+      setDraftWebhook(config.webhookUrl || '');
     }
-  }, [isOpen, config.sheetUrl, config.sheetId]);
+  }, [isOpen, config.sheetUrl, config.sheetId, config.webhookUrl]);
 
   useEffect(() => {
     if (isOpen) {
       setActiveTab('master');
       setMasterDraft(cloneMasterData(masterData));
       setMasterError(null);
+      setSourceMessage(null);
     }
-    // Reset the draft only when the modal opens, not on every master data refresh.
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -62,7 +67,7 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
   const hasMasterChanges = !isSameMasterData(masterDraft, masterData);
 
   const handleClose = () => {
-    if (isSavingMaster) return;
+    if (isSavingMaster || isDownloadingSource) return;
     if (hasMasterChanges && !window.confirm('저장하지 않은 마스터 데이터 변경 내용이 있습니다. 닫을까요?')) {
       return;
     }
@@ -70,7 +75,7 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
   };
 
   const handleRestoreDefaults = () => {
-    if (!window.confirm('마스터 데이터를 기본값으로 되돌릴까요? 완료 및 닫기를 눌러야 시트에 반영됩니다.')) {
+    if (!window.confirm('마스터 데이터를 기본값으로 되돌릴까요? 저장을 눌러야 시트에 반영됩니다.')) {
       return;
     }
     setMasterDraft(cloneMasterData(DEFAULT_MASTER_DATA));
@@ -96,19 +101,67 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
     }
   };
 
-  const displayUrl = draftUrl || config.sheetUrl || config.sheetId || '';
-  const parsedId = extractSheetId(displayUrl);
-  const canOpenSheet = Boolean(parsedId || config.sheetId);
-
-  const handleUrlChange = (raw: string) => {
-    setDraftUrl(raw);
-    const id = extractSheetId(raw);
+  const handleSaveSheet = () => {
+    const sheetUrl = draftUrl.trim();
+    const webhookUrl = draftWebhook.trim();
+    const id = extractSheetId(sheetUrl);
     onUpdateConfig({
-      sheetUrl: raw.trim(),
+      sheetUrl,
       sheetId: id || '',
-      isConnected: false,
-      lastError: null,
+      webhookUrl,
+      ...(id !== config.sheetId ? { isConnected: false, lastError: null } : {}),
     });
+    onClose();
+  };
+
+  const handleDownloadSource = async () => {
+    if (isDownloadingSource) return;
+    setIsDownloadingSource(true);
+    setSourceMessage(null);
+    try {
+      const response = await fetch('/api/download-source');
+      if (!response.ok) {
+        throw new Error('소스 코드 다운로드에 실패했습니다.');
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get('Content-Disposition');
+      let filename = 'product-inventory-management-source.zip';
+      if (disposition) {
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        if (match?.[1]) filename = match[1];
+      }
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(downloadUrl);
+      setSourceMessage('소스 코드(.zip) 다운로드를 완료했습니다.');
+    } catch (error) {
+      setSourceMessage(error instanceof Error ? error.message : '소스 다운로드 중 오류가 발생했습니다.');
+    } finally {
+      setIsDownloadingSource(false);
+    }
+  };
+
+  const tabMeta: Record<SettingsTab, { title: string; description: string; icon: React.ReactNode }> = {
+    master: {
+      title: '마스터 데이터 관리',
+      description: '제품, 거점, 제품 분류, 공급사 기준 정보를 통합 관리합니다.',
+      icon: <SlidersHorizontal className="w-5 h-5" />,
+    },
+    sheet: {
+      title: '구글 시트 연동 설정',
+      description: '연결할 시트와 저장용 웹앱만 등록합니다.',
+      icon: <FileSpreadsheet className="w-5 h-5" />,
+    },
+    source: {
+      title: '소스 받기',
+      description: '현재 앱의 소스 코드를 zip 파일로 받습니다.',
+      icon: <FileDown className="w-5 h-5" />,
+    },
   };
 
   return (
@@ -123,21 +176,11 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
-              {activeTab === 'master' ? (
-                <SlidersHorizontal className="w-5 h-5" />
-              ) : (
-                <FileSpreadsheet className="w-5 h-5" />
-              )}
+              {tabMeta[activeTab].icon}
             </div>
             <div className="min-w-0">
-              <h3 className="text-base font-extrabold text-slate-900">
-                {activeTab === 'master' ? '마스터 데이터 관리' : '구글 시트 연동 설정'}
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {activeTab === 'master'
-                  ? '제품, 거점, 제품 분류, 공급사 기준 정보를 통합 관리합니다.'
-                  : '연결할 시트와 저장용 웹앱만 등록합니다.'}
-              </p>
+              <h3 className="text-base font-extrabold text-slate-900">{tabMeta[activeTab].title}</h3>
+              <p className="text-xs text-slate-500 mt-0.5">{tabMeta[activeTab].description}</p>
             </div>
           </div>
           <button
@@ -149,11 +192,12 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
           </button>
         </div>
 
-        <div className="px-5 border-b border-slate-200 flex items-end gap-1" role="tablist">
+        <div className="px-5 border-b border-slate-200 flex items-end gap-1 overflow-x-auto" role="tablist">
           {(
             [
               { id: 'master', label: '마스터 데이터 관리', icon: <SlidersHorizontal className="w-4 h-4" /> },
               { id: 'sheet', label: '구글 시트 연동 설정', icon: <Database className="w-4 h-4" /> },
+              { id: 'source', label: '소스 받기', icon: <FileDown className="w-4 h-4" /> },
             ] as { id: SettingsTab; label: string; icon: React.ReactNode }[]
           ).map((tab) => {
             const isActive = activeTab === tab.id;
@@ -164,7 +208,7 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-3 text-xs font-bold border-b-2 -mb-px transition-colors ${
+                className={`flex items-center gap-2 px-4 py-3 text-xs font-bold border-b-2 -mb-px whitespace-nowrap transition-colors ${
                   isActive
                     ? 'border-slate-900 text-slate-900'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -177,7 +221,7 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
           })}
         </div>
 
-        {activeTab === 'master' ? (
+        {activeTab === 'master' && (
           <div className="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
             {masterError && (
               <div className="bg-rose-50 border border-rose-200 p-3.5 rounded-2xl text-rose-800 font-medium leading-relaxed">
@@ -186,70 +230,64 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
             )}
             <MasterDataPanel value={masterDraft} onChange={setMasterDraft} disabled={isSavingMaster} />
           </div>
-        ) : (
-        <div className="p-5 space-y-5 overflow-y-auto flex-1 text-xs">
-          {config.isConnected ? (
-            <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-2xl flex items-center gap-3">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-              <div className="min-w-0">
-                <p className="font-extrabold text-emerald-900 text-sm">시트 연결됨</p>
-                <p className="text-emerald-700 mt-0.5 truncate">
-                  {config.lastSavedAt ? `마지막 저장 ${config.lastSavedAt}` : '아직 시트에 저장한 적 없음'}
-                  {config.lastSyncedAt ? ` · 마지막 불러오기 ${config.lastSyncedAt}` : ''}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-2xl flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-extrabold text-amber-900 text-sm">시트가 아직 연결되지 않았습니다</p>
-                <p className="text-amber-800 mt-0.5 leading-relaxed">
-                  시트 URL을 붙여넣고, 공유를 링크가 있는 모든 사용자(뷰어)로 열어 주세요.
-                </p>
-              </div>
-            </div>
-          )}
+        )}
 
-          {config.lastError && (
-            <div className="bg-rose-50 border border-rose-200 p-3.5 rounded-2xl text-rose-800 font-medium leading-relaxed">
-              {config.lastError}
-            </div>
-          )}
+        {activeTab === 'sheet' && (
+          <div className="p-6 sm:p-8 space-y-8 overflow-y-auto flex-1">
+            <section className="space-y-3">
+              <h4 className="text-base font-extrabold text-slate-900">1. 시트 연결</h4>
+              <label className="block text-sm font-semibold text-slate-700" htmlFor="input-sheet-url-or-id">
+                구글 스프레드시트 URL
+              </label>
+              <input
+                id="input-sheet-url-or-id"
+                type="url"
+                value={draftUrl}
+                onChange={(e) => setDraftUrl(e.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/d/……/edit"
+                className={inputClass}
+              />
+            </section>
 
-          <section className="space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <h4 className="font-extrabold text-slate-900 text-sm">1. 시트 연결</h4>
-            </div>
-            <label className="block font-bold text-slate-700" htmlFor="input-sheet-url-or-id">
-              구글 스프레드시트 URL
-            </label>
-            <input
-              id="input-sheet-url-or-id"
-              type="url"
-              value={displayUrl}
-              onChange={(e) => handleUrlChange(e.target.value)}
-              placeholder="https://docs.google.com/spreadsheets/d/……/edit"
-              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-slate-800 font-medium font-mono outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            />
-          </section>
+            <div className="border-t border-slate-200" />
 
-          <section className="space-y-2.5 pt-1 border-t border-slate-100">
-            <h4 className="font-extrabold text-slate-900 text-sm pt-3">2. 저장 연결</h4>
-            <CopyAppsScriptButton />
-            <label className="block font-bold text-slate-700" htmlFor="input-sheet-webhook-url">
-              저장용 웹앱 URL
-            </label>
-            <input
-              id="input-sheet-webhook-url"
-              type="url"
-              value={config.webhookUrl || ''}
-              onChange={(e) => onUpdateConfig({ webhookUrl: e.target.value })}
-              placeholder="https://script.google.com/macros/s/…/exec"
-              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-slate-800 font-medium font-mono outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            />
-          </section>
-        </div>
+            <section className="space-y-3">
+              <h4 className="text-base font-extrabold text-slate-900">2. 저장 연결</h4>
+              <CopyAppsScriptButton className="rounded-full px-5 py-2.5 text-xs" />
+              <label className="block text-sm font-semibold text-slate-700 pt-2" htmlFor="input-sheet-webhook-url">
+                저장용 웹앱 URL
+              </label>
+              <input
+                id="input-sheet-webhook-url"
+                type="url"
+                value={draftWebhook}
+                onChange={(e) => setDraftWebhook(e.target.value)}
+                placeholder="https://script.google.com/macros/s/…/exec"
+                className={inputClass}
+              />
+            </section>
+          </div>
+        )}
+
+        {activeTab === 'source' && (
+          <div className="p-6 sm:p-8 space-y-5 overflow-y-auto flex-1">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              현재 실행 중인 앱의 소스 코드를 zip 파일로 이 컴퓨터에 저장합니다.
+            </p>
+            {sourceMessage && (
+              <p className="text-sm font-semibold text-slate-700">{sourceMessage}</p>
+            )}
+            <button
+              id="btn-download-source"
+              type="button"
+              onClick={() => void handleDownloadSource()}
+              disabled={isDownloadingSource}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-slate-900 text-white text-xs font-bold disabled:opacity-60"
+            >
+              {isDownloadingSource ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+              {isDownloadingSource ? '준비 중...' : '소스 받기'}
+            </button>
+          </div>
         )}
 
         {activeTab === 'master' ? (
@@ -283,14 +321,31 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
               </button>
             </div>
           </div>
+        ) : activeTab === 'sheet' ? (
+          <div className="p-4 sm:px-8 flex items-center justify-end gap-4">
+            <button
+              type="button"
+              onClick={handleClose}
+              className="text-sm font-semibold text-slate-500 hover:text-slate-800"
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveSheet}
+              className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold"
+            >
+              저장
+            </button>
+          </div>
         ) : (
           <div className="p-4 border-t border-slate-100 flex items-center justify-end bg-slate-50">
             <button
               type="button"
               onClick={handleClose}
-              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold shadow-md shadow-blue-600/20"
+              className="px-5 py-2.5 rounded-2xl text-xs font-bold text-slate-600 hover:bg-slate-200"
             >
-              확인
+              닫기
             </button>
           </div>
         )}
