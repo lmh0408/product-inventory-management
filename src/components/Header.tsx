@@ -105,9 +105,9 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center text-white font-black text-base shadow-sm shadow-blue-500/20">
             S
           </div>
-          <div className="hidden sm:block leading-tight">
+          <div className="hidden sm:flex sm:items-baseline sm:gap-1.5 leading-tight">
             <h1 className="text-sm font-bold tracking-tight text-slate-900">SheetStock</h1>
-            <span className="text-[10px] font-semibold text-blue-600">보관함 재고관리</span>
+            <span className="text-[10px] font-semibold text-slate-400 tabular-nums">v1.2</span>
           </div>
         </div>
 
