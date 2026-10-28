@@ -1653,8 +1653,7 @@ async function createServer() {
     res.setHeader("Expires", "0");
     try {
       const projectRoot = getProjectRootDir();
-      const dateStr = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10).replace(/-/g, "");
-      const filename = `product-inventory-management-src-${dateStr}.zip`;
+      const filename = "product-inventory-src.zip";
       res.setHeader("Content-Type", "application/zip");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       const archive = new ZipArchive({
@@ -1676,7 +1675,11 @@ async function createServer() {
           ".aistudio/**",
           "server.prod.mjs",
           "**/*.log",
-          ".DS_Store"
+          ".DS_Store",
+          ".env",
+          ".env.*",
+          "**/.env",
+          "**/.env.*"
         ],
         dot: true
       });

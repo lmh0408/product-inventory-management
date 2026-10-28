@@ -66,8 +66,7 @@ export async function createServer() {
 
     try {
       const projectRoot = getProjectRootDir();
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const filename = `product-inventory-management-src-${dateStr}.zip`;
+      const filename = 'product-inventory-src.zip';
 
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -95,6 +94,10 @@ export async function createServer() {
           'server.prod.mjs',
           '**/*.log',
           '.DS_Store',
+          '.env',
+          '.env.*',
+          '**/.env',
+          '**/.env.*',
         ],
         dot: true,
       });

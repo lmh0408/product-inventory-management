@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { MasterData, SheetConfig } from '../types';
 import { extractSheetId } from '../utils/googleSheetSync';
 import {
@@ -8,8 +8,10 @@ import {
   Database,
   RotateCcw,
   Check,
+  CheckCircle2,
   Loader2,
   FileDown,
+  Download,
 } from 'lucide-react';
 import { CopyAppsScriptButton } from './CopyAppsScriptButton';
 import { MasterDataPanel } from './MasterDataPanel';
@@ -29,6 +31,13 @@ interface GoogleSheetSyncModalProps {
 const inputClass =
   'w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-800 font-medium font-mono outline-none focus:border-slate-400';
 
+const SOURCE_ZIP_NAME = 'product-inventory-src.zip';
+
+type SourceToast = {
+  message: string;
+  tone: 'progress' | 'success' | 'error';
+};
+
 export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
   isOpen,
   onClose,
@@ -44,7 +53,8 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
   const [isSavingMaster, setIsSavingMaster] = useState(false);
   const [masterError, setMasterError] = useState<string | null>(null);
   const [isDownloadingSource, setIsDownloadingSource] = useState(false);
-  const [sourceMessage, setSourceMessage] = useState<string | null>(null);
+  const [sourceToast, setSourceToast] = useState<SourceToast | null>(null);
+  const sourceToastTimer = useRef<number | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -58,16 +68,33 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
       setActiveTab('master');
       setMasterDraft(cloneMasterData(masterData));
       setMasterError(null);
-      setSourceMessage(null);
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    return () => {
+      if (sourceToastTimer.current !== null) window.clearTimeout(sourceToastTimer.current);
+    };
+  }, []);
+
+  const showSourceToast = (toast: SourceToast, autoHideMs?: number) => {
+    if (sourceToastTimer.current !== null) {
+      window.clearTimeout(sourceToastTimer.current);
+      sourceToastTimer.current = null;
+    }
+    setSourceToast(toast);
+    if (autoHideMs) {
+      sourceToastTimer.current = window.setTimeout(() => {
+        setSourceToast(null);
+        sourceToastTimer.current = null;
+      }, autoHideMs);
+    }
+  };
 
   const hasMasterChanges = !isSameMasterData(masterDraft, masterData);
 
   const handleClose = () => {
-    if (isSavingMaster || isDownloadingSource) return;
+    if (isSavingMaster) return;
     if (hasMasterChanges && !window.confirm('저장하지 않은 마스터 데이터 변경 내용이 있습니다. 닫을까요?')) {
       return;
     }
@@ -116,31 +143,29 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
 
   const handleDownloadSource = async () => {
     if (isDownloadingSource) return;
+
     setIsDownloadingSource(true);
-    setSourceMessage(null);
+    showSourceToast({ message: '프로젝트 소스를 저장하는 중입니다.', tone: 'progress' });
     try {
       const response = await fetch('/api/download-source');
       if (!response.ok) {
         throw new Error('소스 코드 다운로드에 실패했습니다.');
       }
       const blob = await response.blob();
-      const disposition = response.headers.get('Content-Disposition');
-      let filename = 'product-inventory-management-source.zip';
-      if (disposition) {
-        const match = disposition.match(/filename="?([^"]+)"?/);
-        if (match?.[1]) filename = match[1];
-      }
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = downloadUrl;
-      link.download = filename;
+      link.download = SOURCE_ZIP_NAME;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(downloadUrl);
-      setSourceMessage('소스 코드(.zip) 다운로드를 완료했습니다.');
-    } catch (error) {
-      setSourceMessage(error instanceof Error ? error.message : '소스 다운로드 중 오류가 발생했습니다.');
+      showSourceToast({ message: '프로젝트 소스를 내려받았습니다.', tone: 'success' });
+    } catch {
+      showSourceToast({
+        message: '소스 다운로드 중 오류가 발생했습니다.',
+        tone: 'error',
+      });
     } finally {
       setIsDownloadingSource(false);
     }
@@ -164,7 +189,40 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
     },
   };
 
+  const sourceToastNode = sourceToast ? (
+    <div
+      role="status"
+      className={`fixed bottom-6 right-6 z-[80] flex items-center gap-2.5 text-white pl-4 pr-2 py-3 rounded-lg shadow-lg ${
+        sourceToast.tone === 'error' ? 'bg-rose-600 shadow-rose-900/20' : 'bg-emerald-600 shadow-emerald-900/20'
+      }`}
+    >
+      {sourceToast.tone === 'progress' ? (
+        <Loader2 className="w-5 h-5 animate-spin shrink-0" />
+      ) : (
+        <CheckCircle2 className="w-5 h-5 shrink-0" />
+      )}
+      <span className="text-sm font-semibold">{sourceToast.message}</span>
+      <button
+        type="button"
+        onClick={() => {
+          if (sourceToastTimer.current !== null) {
+            window.clearTimeout(sourceToastTimer.current);
+            sourceToastTimer.current = null;
+          }
+          setSourceToast(null);
+        }}
+        className="ml-1 p-1 rounded-md hover:bg-white/15"
+        aria-label="알림 닫기"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  ) : null;
+
+  if (!isOpen) return sourceToastNode;
+
   return (
+    <>
     <div
       id="sheet-sync-modal-backdrop"
       className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200"
@@ -173,26 +231,29 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
         id="sheet-sync-modal-card"
         className="bg-white rounded-3xl shadow-2xl border border-slate-100 w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"
       >
-        <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
-              {tabMeta[activeTab].icon}
+        {activeTab !== 'source' && (
+          <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
+                {tabMeta[activeTab].icon}
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-extrabold text-slate-900">{tabMeta[activeTab].title}</h3>
+                <p className="text-xs text-slate-500 mt-0.5">{tabMeta[activeTab].description}</p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <h3 className="text-base font-extrabold text-slate-900">{tabMeta[activeTab].title}</h3>
-              <p className="text-xs text-slate-500 mt-0.5">{tabMeta[activeTab].description}</p>
-            </div>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors shrink-0"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors shrink-0"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+        )}
 
-        <div className="px-5 border-b border-slate-200 flex items-end gap-1 overflow-x-auto" role="tablist">
+        <div className="px-5 border-b border-slate-200 flex items-end justify-between gap-3" role="tablist">
+          <div className="flex items-end gap-1 min-w-0">
           {(
             [
               { id: 'master', label: '마스터 데이터 관리', icon: <SlidersHorizontal className="w-4 h-4" /> },
@@ -208,17 +269,30 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-3 text-xs font-bold border-b-2 -mb-px whitespace-nowrap transition-colors ${
-                  isActive
-                    ? 'border-slate-900 text-slate-900'
-                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                className={`flex items-center gap-2 px-4 py-3.5 text-sm font-semibold border-b-2 -mb-px whitespace-nowrap transition-colors outline-none ${
+                  isActive && tab.id === 'source'
+                    ? 'border-rose-600 text-rose-700'
+                    : isActive
+                      ? 'border-slate-900 text-slate-900'
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
-                {tab.icon}
+                {tab.id === 'source' ? null : tab.icon}
                 {tab.label}
               </button>
             );
           })}
+          </div>
+          {activeTab === 'source' && (
+            <button
+              type="button"
+              onClick={handleClose}
+              className="p-2 mb-1 rounded-xl text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors shrink-0"
+              aria-label="닫기"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {activeTab === 'master' && (
@@ -270,23 +344,12 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
         )}
 
         {activeTab === 'source' && (
-          <div className="p-6 sm:p-8 space-y-5 overflow-y-auto flex-1">
+          <div className="px-6 sm:px-8 pt-8 pb-12 space-y-4 overflow-y-auto flex-1">
+            <h4 className="text-base font-extrabold text-slate-900">프로젝트 소스</h4>
             <p className="text-sm text-slate-600 leading-relaxed">
-              현재 실행 중인 앱의 소스 코드를 zip 파일로 이 컴퓨터에 저장합니다.
+              서버에 있는 현재 프로젝트 소스를 zip 파일로 내려받습니다. git 기록, node_modules, 빌드 결과, 환경 변수
+              파일은 포함되지 않습니다.
             </p>
-            {sourceMessage && (
-              <p className="text-sm font-semibold text-slate-700">{sourceMessage}</p>
-            )}
-            <button
-              id="btn-download-source"
-              type="button"
-              onClick={() => void handleDownloadSource()}
-              disabled={isDownloadingSource}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-slate-900 text-white text-xs font-bold disabled:opacity-60"
-            >
-              {isDownloadingSource ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
-              {isDownloadingSource ? '준비 중...' : '소스 받기'}
-            </button>
           </div>
         )}
 
@@ -339,17 +402,29 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
             </button>
           </div>
         ) : (
-          <div className="p-4 border-t border-slate-100 flex items-center justify-end bg-slate-50">
+          <div className="px-6 sm:px-8 pb-6 flex items-center justify-end gap-4">
             <button
               type="button"
               onClick={handleClose}
-              className="px-5 py-2.5 rounded-2xl text-xs font-bold text-slate-600 hover:bg-slate-200"
+              className="text-sm font-semibold text-slate-500 hover:text-slate-800"
             >
-              닫기
+              취소
+            </button>
+            <button
+              id="btn-download-source"
+              type="button"
+              onClick={() => void handleDownloadSource()}
+              disabled={isDownloadingSource}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-800 text-white text-sm font-bold disabled:opacity-60"
+            >
+              {isDownloadingSource ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              소스 받기
             </button>
           </div>
         )}
       </div>
     </div>
+    {sourceToastNode}
+    </>
   );
 };
