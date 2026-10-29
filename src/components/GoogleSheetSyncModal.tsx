@@ -141,8 +141,41 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
     onClose();
   };
 
+  const saveBlobWithBrowserDownload = (blob: Blob) => {
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = SOURCE_ZIP_NAME;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(downloadUrl);
+  };
+
   const handleDownloadSource = async () => {
     if (isDownloadingSource) return;
+
+    const showSaveFilePicker = (
+      window as Window & {
+        showSaveFilePicker?: (options: {
+          suggestedName?: string;
+          types?: { description?: string; accept: Record<string, string[]> }[];
+        }) => Promise<FileSystemFileHandle>;
+      }
+    ).showSaveFilePicker;
+
+    let fileHandle: FileSystemFileHandle | null = null;
+    if (typeof showSaveFilePicker === 'function') {
+      try {
+        fileHandle = await showSaveFilePicker({
+          suggestedName: SOURCE_ZIP_NAME,
+          types: [{ description: 'ZIP archive', accept: { 'application/zip': ['.zip'] } }],
+        });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        fileHandle = null;
+      }
+    }
 
     setIsDownloadingSource(true);
     showSourceToast({ message: '프로젝트 소스를 저장하는 중입니다.', tone: 'progress' });
@@ -152,14 +185,19 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
         throw new Error('소스 코드 다운로드에 실패했습니다.');
       }
       const blob = await response.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = SOURCE_ZIP_NAME;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(downloadUrl);
+
+      if (fileHandle) {
+        try {
+          const writable = await fileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+        } catch {
+          saveBlobWithBrowserDownload(blob);
+        }
+      } else {
+        saveBlobWithBrowserDownload(blob);
+      }
+
       showSourceToast({ message: '프로젝트 소스를 내려받았습니다.', tone: 'success' });
     } catch {
       showSourceToast({

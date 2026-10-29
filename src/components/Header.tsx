@@ -93,14 +93,14 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const actionClass =
-    'flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors disabled:opacity-60 disabled:cursor-not-allowed';
+    'flex items-center justify-center gap-1.5 min-h-10 min-w-10 px-2.5 lg:min-h-0 lg:min-w-0 lg:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors disabled:opacity-60 disabled:cursor-not-allowed';
 
   return (
     <header
       id="app-main-header"
       className="bg-white border-b border-slate-200 shrink-0 z-20 select-none"
     >
-      <div className="h-14 grid grid-cols-[auto_1fr_auto] lg:grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-3 px-3 sm:px-6">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 px-3 py-2 sm:px-6 lg:h-14 lg:flex-nowrap lg:gap-3 lg:py-0">
         <div className="flex items-center gap-2.5 shrink-0">
           <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center text-white font-black text-base shadow-sm shadow-blue-500/20">
             S
@@ -112,10 +112,10 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         <nav
-          className="min-w-0 flex items-center justify-center"
+          className="order-last basis-full min-w-0 lg:order-none lg:basis-auto lg:flex-1 lg:flex lg:justify-center"
           aria-label="주요 메뉴"
         >
-          <div className="flex items-center gap-0.5 sm:gap-1 bg-slate-100 p-1 rounded-2xl overflow-x-auto max-w-full">
+          <div className="flex w-full items-center gap-0.5 bg-slate-100 p-1 rounded-2xl lg:w-auto lg:max-w-full">
             {NAV_ITEMS.map((item) => {
               const isActive = activeTab === item.id;
               return (
@@ -126,18 +126,18 @@ export const Header: React.FC<HeaderProps> = ({
                   onClick={() => setActiveTab(item.id)}
                   aria-current={isActive ? 'page' : undefined}
                   title={item.label}
-                  className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                  className={`flex flex-1 lg:flex-none items-center justify-center gap-1.5 px-2 lg:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
                     isActive
                       ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/20'
                       : 'text-slate-600 hover:bg-white hover:text-blue-600'
                   }`}
                 >
                   <span className={isActive ? 'text-white' : 'text-slate-400'}>{item.icon}</span>
-                  <span className="hidden md:inline">{item.label}</span>
-                  <span className="md:hidden">{item.shortLabel}</span>
+                  <span className="hidden lg:inline">{item.label}</span>
+                  <span className="lg:hidden">{item.shortLabel}</span>
                   {item.badge && (
                     <span
-                      className={`hidden lg:inline px-1.5 py-0.5 text-[9px] font-bold rounded-md ${
+                      className={`hidden xl:inline px-1.5 py-0.5 text-[9px] font-bold rounded-md ${
                         isActive
                           ? 'bg-white/25 text-white'
                           : 'bg-amber-50 text-amber-600 border border-amber-200/60'
@@ -152,21 +152,22 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </nav>
 
-        <div className="flex items-center justify-end gap-1 sm:gap-1.5 shrink-0 overflow-x-auto">
+        <div className="ml-auto flex items-center justify-end gap-1 shrink-0 lg:order-3 lg:ml-0 lg:gap-1.5">
           <button
             id="btn-save-to-sheet"
             type="button"
             onClick={() => void handleSave()}
             disabled={isBusy}
             title="앱의 재고·입출고 내역을 원장 시트에 저장"
+            aria-label="저장"
             className={`${actionClass} text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200`}
           >
             {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-            <span>저장</span>
+            <span className="hidden lg:inline">저장</span>
             {typeof sheetConfig.lastSavedAtMs === 'number' && (
               <ElapsedTime
                 since={sheetConfig.lastSavedAtMs}
-                className="hidden sm:inline ml-1 pl-2 border-l border-blue-200 font-medium text-blue-600 tabular-nums"
+                className="hidden lg:inline ml-1 pl-2 border-l border-blue-200 font-medium text-blue-600 tabular-nums"
               />
             )}
           </button>
@@ -176,6 +177,7 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => void handleLoad()}
             disabled={isBusy}
             title="원장 시트의 최신 데이터를 앱으로 불러오기"
+            aria-label="불러오기"
             className={`${actionClass} text-slate-700 bg-white hover:bg-slate-50 border border-slate-200`}
           >
             {isLoading || sheetConfig.isSyncing ? (
@@ -183,11 +185,11 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <Download className="w-4 h-4 text-slate-500" />
             )}
-            <span>불러오기</span>
+            <span className="hidden lg:inline">불러오기</span>
             {typeof sheetConfig.lastSyncedAtMs === 'number' && (
               <ElapsedTime
                 since={sheetConfig.lastSyncedAtMs}
-                className="hidden sm:inline ml-1 pl-2 border-l border-slate-200 font-medium text-slate-400 tabular-nums"
+                className="hidden lg:inline ml-1 pl-2 border-l border-slate-200 font-medium text-slate-400 tabular-nums"
               />
             )}
           </button>
@@ -198,10 +200,11 @@ export const Header: React.FC<HeaderProps> = ({
               target="_blank"
               rel="noreferrer"
               title="원장 구글 시트 열기"
+              aria-label="시트 열기"
               className={`${actionClass} text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200`}
             >
               <ExternalLink className="w-4 h-4" />
-              <span>시트 열기</span>
+              <span className="hidden lg:inline">시트 열기</span>
             </a>
           ) : (
             <button
@@ -209,10 +212,11 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               disabled
               title="연결된 시트가 없습니다"
+              aria-label="시트 열기"
               className={`${actionClass} text-emerald-700 bg-emerald-50 border border-emerald-200`}
             >
               <ExternalLink className="w-4 h-4" />
-              <span>시트 열기</span>
+              <span className="hidden lg:inline">시트 열기</span>
             </button>
           )}
           <button
@@ -220,10 +224,11 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             onClick={onOpenSheetSyncModal}
             title="설정"
+            aria-label="설정"
             className={`${actionClass} text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200`}
           >
             <Settings className="w-4 h-4" />
-            <span>설정</span>
+            <span className="hidden lg:inline">설정</span>
           </button>
         </div>
       </div>

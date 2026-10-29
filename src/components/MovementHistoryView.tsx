@@ -207,7 +207,7 @@ export const MovementHistoryView: React.FC<MovementHistoryViewProps> = ({
   };
 
   return (
-    <div id="movement-history-container" className="px-8 pb-8 space-y-6 flex-1 overflow-y-auto relative">
+    <div id="movement-history-container" className="px-4 sm:px-8 pb-8 space-y-6 flex-1 overflow-y-auto relative">
       {/* Toast Notification */}
       {showToast && (
         <div className="fixed top-20 right-8 z-50 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-top-2">
