@@ -3,6 +3,7 @@ import type { LocationId, LocationStock, ProductId, StockMovement } from '../src
 import {
   planDashboardRemarkUpdate,
   planFullPersist,
+  planPendingAppends,
   planSheetWrites,
   planStockPersist,
   quoteA1SheetName,
@@ -339,6 +340,7 @@ async function executeGoogleSheetSave(
   let authoritativeStocks: LocationStock[] | undefined;
   let authoritativeMovements: StockMovement[] | undefined;
   let planningError = '';
+  let syncUnchanged = false;
   if (
     SHEET_ID_PATTERN.test(sheetId) &&
     (Array.isArray(body.stocks) || action === 'UPDATE_DASHBOARD_REMARK')
@@ -429,7 +431,9 @@ async function executeGoogleSheetSave(
                 remark.locationId,
                 String(remark.value || '')
               )
-            : action === 'SYNC_APP_DATA'
+            : action === 'SYNC_APP_DATA' && body.incremental === true
+              ? planPendingAppends(workbook, effectiveMovements)
+              : action === 'SYNC_APP_DATA'
               ? planFullPersist(workbook, effectiveStocks, effectiveMovements)
               : body.movement
                 ? planSheetWrites(
@@ -442,11 +446,17 @@ async function executeGoogleSheetSave(
         updates = plan.updates;
         replacements =
           'replacements' in plan ? (plan.replacements as SheetLedgerReplacement[]) : [];
+        syncUnchanged =
+          action === 'SYNC_APP_DATA' &&
+          appends.length === 0 &&
+          updates.length === 0 &&
+          replacements.length === 0;
       }
     } catch (error) {
       appends = [];
       updates = [];
       replacements = [];
+      syncUnchanged = false;
       planningError =
         error instanceof Error ? error.message : '시트 구조를 분석하지 못했습니다.';
     }
@@ -473,7 +483,21 @@ async function executeGoogleSheetSave(
       },
     };
   }
-  if (action === 'SYNC_APP_DATA' && replacements.length === 0) {
+  if (action === 'SYNC_APP_DATA' && syncUnchanged) {
+    return {
+      status: 200,
+      json: {
+        ok: true,
+        version: 9,
+        appendedCount: 0,
+        updatedCount: 0,
+        deletedCount: 0,
+        ...(authoritativeStocks ? { stocks: authoritativeStocks } : {}),
+        ...(authoritativeMovements ? { movements: authoritativeMovements } : {}),
+      },
+    };
+  }
+  if (action === 'SYNC_APP_DATA' && replacements.length === 0 && appends.length === 0) {
     return {
       status: 422,
       json: {
@@ -542,6 +566,11 @@ async function executeGoogleSheetSave(
   }
 
   const movementRows: Record<string, Array<{ sheetName: string; row: number }>> = {};
+  for (const append of appends as Array<{ sheetName: string; row: number; movementId?: string }>) {
+    if (!append.movementId) continue;
+    if (!movementRows[append.movementId]) movementRows[append.movementId] = [];
+    movementRows[append.movementId].push({ sheetName: append.sheetName, row: append.row });
+  }
   for (const replacement of replacements) {
     replacement.movementIds.forEach((movementId, index) => {
       if (!movementRows[movementId]) movementRows[movementId] = [];
@@ -551,6 +580,11 @@ async function executeGoogleSheetSave(
       });
     });
   }
+
+  const webhookAction =
+    action === 'SYNC_APP_DATA' && replacements.length === 0 && appends.length > 0
+      ? 'APPLY_WRITES'
+      : action;
 
   const response = await fetch(webhookUrl, {
     method: 'POST',
@@ -563,7 +597,7 @@ async function executeGoogleSheetSave(
       'Cache-Control': 'no-cache, no-store, max-age=0',
     },
     body: JSON.stringify({
-      action,
+      action: webhookAction,
       sheetId,
       movement: body.movement,
       stocks: authoritativeStocks || body.stocks,
@@ -571,6 +605,9 @@ async function executeGoogleSheetSave(
       updates,
       deletes,
       replacements,
+      ...(typeof body.knownDataVersion === 'number'
+        ? { knownDataVersion: body.knownDataVersion }
+        : {}),
     }),
   });
 
@@ -649,6 +686,31 @@ async function executeGoogleSheetSave(
         error: explainAppsScriptResponse(text),
       },
     };
+  }
+}
+
+export async function fetchSheetDataVersion(webhookUrl: string): Promise<JsonHttpResult> {
+  if (!isAllowedWebhook(webhookUrl)) {
+    return { status: 400, json: { ok: false, error: '웹앱 URL이 올바르지 않습니다.' } };
+  }
+  try {
+    const response = await fetch(webhookUrl, {
+      redirect: 'follow',
+      cache: 'no-store',
+      signal: AbortSignal.timeout(15_000),
+      headers: { 'User-Agent': 'Mozilla/5.0 SheetStockSync/1.0' },
+    });
+    const text = await response.text();
+    const parsed = JSON.parse(text) as { dataVersion?: unknown };
+    return {
+      status: 200,
+      json: {
+        ok: true,
+        dataVersion: typeof parsed.dataVersion === 'number' ? parsed.dataVersion : null,
+      },
+    };
+  } catch {
+    return { status: 200, json: { ok: true, dataVersion: null } };
   }
 }
 

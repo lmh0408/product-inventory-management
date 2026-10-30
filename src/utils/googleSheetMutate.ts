@@ -8,7 +8,6 @@ import {
   isHistoricalTab,
   matchLocation,
   matchProduct,
-  parseGoogleWorkbook,
   pickDashboardSheetName,
   sheetToRows,
 } from './googleSheetSync';
@@ -18,6 +17,7 @@ export interface SheetAppend {
   row: number;
   values: Array<string | number>;
   insertBefore?: boolean;
+  movementId?: string;
 }
 
 export interface SheetCellUpdate {
@@ -94,6 +94,62 @@ function planLedgerTotalFormulaUpdates(
     });
   }
   return updates;
+}
+
+function ledgerDateKey(value: unknown): string | null {
+  if (typeof value === 'number' && value > 20000 && value < 80000) {
+    const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86_400_000);
+    if (Number.isNaN(date.getTime())) return null;
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+  }
+  const text = cellText(value).replace(/\s+/g, '');
+  const iso = text.match(/(\d{4})[./-](\d{1,2})[./-](\d{1,2})/);
+  if (!iso) return null;
+  return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`;
+}
+
+function ledgerCellKey(
+  value: unknown,
+  column: number,
+  dateCol: number,
+  quantityCols: ReadonlySet<number>
+): string {
+  if (quantityCols.has(column)) {
+    if (value == null || value === '') return '0';
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    const parsed = Number(cellText(value).replace(/,/g, ''));
+    return Number.isFinite(parsed) ? String(parsed) : cellText(value);
+  }
+  if (column === dateCol) {
+    const date = ledgerDateKey(value);
+    if (date) return date;
+  }
+  return cellText(value);
+}
+
+function ledgerBlockMatches(
+  rows: unknown[][],
+  startRow: number,
+  lastDataRow: number,
+  columnCount: number,
+  planned: Array<Array<string | number>>,
+  dateCol: number,
+  quantityCols: ReadonlySet<number>
+): boolean {
+  const existingCount = Math.max(0, lastDataRow - startRow + 1);
+  if (planned.length !== existingCount) return false;
+  for (let index = 0; index < planned.length; index++) {
+    const existing = rows[startRow - 1 + index] || [];
+    for (let column = 0; column < columnCount; column++) {
+      if (
+        ledgerCellKey(existing[column], column, dateCol, quantityCols) !==
+        ledgerCellKey(planned[index][column], column, dateCol, quantityCols)
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 function lastFilledExcelRow(rows: unknown[][], colIdx: number, startRow0: number): number {
@@ -321,7 +377,6 @@ export function planFullPersist(
   stocks: LocationStock[],
   movements: StockMovement[]
 ): SheetFullWritePlan {
-  const currentSheetMovements = parseGoogleWorkbook(workbook).movements;
   const ledgerRows: Record<
     LocationId,
     Array<{ movementId: string; movement: StockMovement; typeLabel: string; sign: number }>
@@ -363,6 +418,7 @@ export function planFullPersist(
   }
 
   const replacements: SheetLedgerReplacement[] = [];
+  let consideredLedgers = 0;
   for (const locationId of Object.keys(ledgerRows) as LocationId[]) {
     const sheetName = locationSheetName(workbook, locationId);
     if (!sheetName) {
@@ -412,7 +468,7 @@ export function planFullPersist(
     }
     const plannedRows = ledgerRows[locationId];
     const managedSourceRows = new Set(
-      currentSheetMovements.flatMap((movement) =>
+      movements.flatMap((movement) =>
         (movement.sheetRows || [])
           .filter((ref) => ref.sheetName === sheetName)
           .map((ref) => ref.row)
@@ -445,12 +501,23 @@ export function planFullPersist(
         movement.partnerOrRecipient
       )
     );
+    const columnCount = Math.max(header.length, 3);
     const values = [...managedValues, ...unmanagedValues];
+    const clearRowCount = Math.max(0, lastDataRow - startRow + 1);
+    consideredLedgers += 1;
+    const quantityCols = new Set(
+      Object.values(productCols).filter((column): column is number => typeof column === 'number')
+    );
+    if (
+      ledgerBlockMatches(rows, startRow, lastDataRow, columnCount, values, dateCol, quantityCols)
+    ) {
+      continue;
+    }
     replacements.push({
       sheetName,
       startRow,
-      clearRowCount: Math.max(0, lastDataRow - startRow + 1),
-      columnCount: Math.max(header.length, 3),
+      clearRowCount,
+      columnCount,
       values,
       movementIds: plannedRows.map(({ movementId }) => movementId),
       formulaRow,
@@ -467,7 +534,7 @@ export function planFullPersist(
       )
     )
   );
-  if (replacements.length === 0) {
+  if (consideredLedgers === 0) {
     throw new Error('동기화할 원장 탭을 찾지 못했습니다.');
   }
   return { appends: [], updates, replacements };
@@ -544,6 +611,70 @@ export function planSheetWrites(
   if (appends.length === 0) {
     throw new Error('시트에서 입출고를 남길 탭/열을 찾지 못했습니다. Dashboard와 거점 탭 이름을 확인해 주세요.');
   }
+  return { appends, updates };
+}
+
+export function planPendingAppends(
+  workbook: XLSX.WorkBook,
+  movements: StockMovement[]
+): SheetWritePlan {
+  const nextRowBySheet = new Map<string, number>();
+  const appends: SheetAppend[] = [];
+
+  const pushAppend = (
+    locationId: LocationId | undefined,
+    date: string,
+    typeLabel: string,
+    desc: string,
+    items: StockMovement['items'],
+    sign: number,
+    partner: string | undefined,
+    movementId: string
+  ) => {
+    const planned = planLedgerAppend(
+      workbook,
+      locationId,
+      date,
+      typeLabel,
+      desc,
+      items,
+      sign,
+      partner
+    );
+    if (!planned) return;
+    const row = nextRowBySheet.get(planned.sheetName) ?? planned.row;
+    nextRowBySheet.set(planned.sheetName, row + 1);
+    appends.push({ ...planned, row, movementId });
+  };
+
+  for (const movement of movements) {
+    const desc = movement.description || '';
+    const date = movement.date || '';
+    const partner = movement.partnerOrRecipient || '';
+    if (movement.type === 'TRANSFER') {
+      pushAppend(movement.fromLocation, date, '출고', desc, movement.items, -1, partner, movement.id);
+      pushAppend(movement.toLocation, date, '입고', desc, movement.items, 1, partner, movement.id);
+    } else {
+      pushAppend(
+        movement.locationId || movement.toLocation || movement.fromLocation,
+        date,
+        movement.type === 'IN' ? '입고' : movement.type === 'ADJUSTMENT' ? '보정' : '출고',
+        desc,
+        movement.items,
+        movement.type === 'OUT' ? -1 : 1,
+        partner,
+        movement.id
+      );
+    }
+  }
+
+  if (movements.length > 0 && appends.length === 0) {
+    throw new Error('시트에서 입출고를 남길 탭/열을 찾지 못했습니다. Dashboard와 거점 탭 이름을 확인해 주세요.');
+  }
+
+  const updates = [...nextRowBySheet.entries()].flatMap(([sheetName, nextRow]) =>
+    planLedgerTotalFormulaUpdates(workbook, sheetName, nextRow - 1)
+  );
   return { appends, updates };
 }
 

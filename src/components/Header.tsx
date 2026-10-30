@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   LayoutDashboard,
   ArrowLeftRight,
@@ -64,19 +64,25 @@ export const Header: React.FC<HeaderProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   const isBusy = isSaving || isLoading || sheetConfig.isSyncing;
   const sheetUrl = sheetConfig.sheetId ? toSheetUrl(sheetConfig.sheetId) : '';
 
   const flashToast = (message: string) => {
     setToast(message);
-    window.setTimeout(() => setToast(null), 3000);
+    if (toastTimerRef.current != null) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 3000);
   };
 
   const handleSave = async () => {
     if (isBusy) return;
     setIsSaving(true);
+    flashToast('시트에 저장하는 중입니다.');
     try {
-      if (await onSaveToSheet()) flashToast('앱 데이터를 원장 시트에 저장했습니다.');
+      const saved = await onSaveToSheet();
+      flashToast(
+        saved ? '앱 데이터를 원장 시트에 저장했습니다.' : '시트 저장에 실패했습니다.'
+      );
     } finally {
       setIsSaving(false);
     }

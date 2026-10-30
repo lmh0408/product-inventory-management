@@ -278,6 +278,12 @@ export default function App() {
   });
   const sheetConfigRef = useRef(sheetConfig);
   sheetConfigRef.current = sheetConfig;
+  const movementsRef = useRef(movements);
+  movementsRef.current = movements;
+  const knownDataVersionRef = useRef<number | null>(null);
+  const rememberDataVersion = (version: number | undefined) => {
+    if (typeof version === 'number') knownDataVersionRef.current = version;
+  };
 
   const [masterData, setMasterData] = useState<MasterData>(() => {
     const saved = localStorage.getItem(MASTER_DATA_STORAGE_KEY);
@@ -504,6 +510,8 @@ export default function App() {
     }
 
     isMutatingRef.current = true;
+    const previousStocks = stocks;
+    const previousMovements = movements;
     try {
       const newMovement: StockMovement = {
         ...newMovementData,
@@ -512,15 +520,38 @@ export default function App() {
       };
 
       const optimisticStocks = applyMovementToStocks(stocks, newMovement);
+      const pendingMovements: StockMovement[] =
+        newMovement.type === 'TRANSFER'
+          ? [
+              {
+                ...newMovement,
+                id: `${newMovement.id}-OUT`,
+                type: 'OUT',
+                locationId: newMovement.fromLocation,
+                toLocation: undefined,
+              },
+              {
+                ...newMovement,
+                id: `${newMovement.id}-IN`,
+                type: 'IN',
+                locationId: newMovement.toLocation,
+                fromLocation: undefined,
+              },
+            ]
+          : [newMovement];
+      setStocks(optimisticStocks);
+      setMovements((prev) => sortMovementsAscending([...prev, ...pendingMovements]));
       const result = await saveMovementToSheet({
         webhookUrl,
         sheetId: sheetConfigRef.current.sheetId,
         movement: newMovement,
         stocks: optimisticStocks,
+        knownDataVersion: knownDataVersionRef.current,
       });
       if (result.appendedCount < 1) {
         throw new Error('입출고 내역이 시트에 추가되지 않았습니다.');
       }
+      rememberDataVersion(result.dataVersion);
       newMovement.sheetRows = result.appends?.map((ref) => ({
         ...ref,
         expectedDescription: newMovement.description,
@@ -531,27 +562,22 @@ export default function App() {
         newMovement.type === 'TRANSFER'
           ? [
               {
-                ...newMovement,
-                id: `${newMovement.id}-OUT`,
-                type: 'OUT',
-                locationId: newMovement.fromLocation,
-                toLocation: undefined,
+                ...pendingMovements[0],
                 sheetRows: newMovement.sheetRows?.[0] ? [newMovement.sheetRows[0]] : [],
                 sheetSynced: true,
               },
               {
-                ...newMovement,
-                id: `${newMovement.id}-IN`,
-                type: 'IN',
-                locationId: newMovement.toLocation,
-                fromLocation: undefined,
+                ...pendingMovements[1],
                 sheetRows: newMovement.sheetRows?.[1] ? [newMovement.sheetRows[1]] : [],
                 sheetSynced: true,
               },
             ]
           : [{ ...newMovement, sheetSynced: true }];
       setMovements((prev) =>
-        sortMovementsAscending([...prev, ...syncedMovements])
+        sortMovementsAscending([
+          ...prev.filter((movement) => !pendingMovements.some((pending) => pending.id === movement.id)),
+          ...syncedMovements,
+        ])
       );
       const savedAtMs = Date.now();
       setSheetConfig((prev) => ({
@@ -560,9 +586,10 @@ export default function App() {
         lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
-      void handleTriggerSync(undefined, { force: true, silent: true });
       return true;
     } catch (error) {
+      setStocks(previousStocks);
+      setMovements(previousMovements);
       throw error instanceof Error
         ? error
         : new Error('시트 저장에 실패했습니다. 앱 재고는 바꾸지 않았습니다.');
@@ -586,6 +613,8 @@ export default function App() {
     }
 
     isMutatingRef.current = true;
+    const previousStocks = stocks;
+    const previousMovements = movements;
     try {
       const rootId =
         originals[0]?.id.replace(/-(OUT|IN)$/, '') ||
@@ -613,7 +642,7 @@ export default function App() {
                 locationId: movementData.fromLocation,
                 toLocation: undefined,
                 sheetSynced: false,
-                sheetRows: [],
+                sheetRows: originals.find((movement) => movement.type === 'OUT')?.sheetRows || [],
               },
               {
                 ...movementData,
@@ -624,7 +653,7 @@ export default function App() {
                 locationId: movementData.toLocation,
                 fromLocation: undefined,
                 sheetSynced: false,
-                sheetRows: [],
+                sheetRows: originals.find((movement) => movement.type === 'IN')?.sheetRows || [],
               },
             ]
           : [
@@ -634,13 +663,18 @@ export default function App() {
                   originals.find((movement) => movement.type === movementData.type)?.id ||
                   `${rootId}-${movementData.type}`,
                 sheetSynced: false,
-                sheetRows: [],
+                sheetRows:
+                  originals.find((movement) => movement.type === movementData.type)?.sheetRows ||
+                  originals[0]?.sheetRows ||
+                  [],
               },
             ];
       const nextMovements = sortMovementsAscending([
         ...movements.filter((movement) => !sourceMovementIds.includes(movement.id)),
         ...replacementMovements,
       ]);
+      setStocks(updatedStocks);
+      setMovements(nextMovements);
 
       const result = await saveAppDataToSheet({
         webhookUrl: sheetConfigRef.current.webhookUrl || '',
@@ -650,7 +684,9 @@ export default function App() {
         sourceMovementIds,
         originalMovements: originals,
         replacementMovements,
+        knownDataVersion: knownDataVersionRef.current,
       });
+      rememberDataVersion(result.dataVersion);
       const baseMovements = result.movements || nextMovements;
       const syncedMovements = baseMovements.map((movement) => ({
         ...movement,
@@ -671,9 +707,10 @@ export default function App() {
         lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
-      void handleTriggerSync(undefined, { force: true, silent: true });
       return true;
     } catch (error) {
+      setStocks(previousStocks);
+      setMovements(previousMovements);
       const message =
         error instanceof Error ? error.message : '수정 내역을 시트에 저장하지 못했습니다.';
       setSheetConfig((prev) => ({ ...prev, lastError: message }));
@@ -689,21 +726,22 @@ export default function App() {
   ): Promise<boolean> => {
     if (isMutatingRef.current) return false;
     isMutatingRef.current = true;
+    const previousStocks = stocks;
+    setStocks((prev) =>
+      prev.map((stock) => (stock.locationId === locationId ? { ...stock, remarks } : stock))
+    );
     try {
       const result = await saveDashboardRemark({
         webhookUrl: sheetConfigRef.current.webhookUrl || '',
         sheetId: sheetConfigRef.current.sheetId,
         locationId,
         value: remarks,
+        knownDataVersion: knownDataVersionRef.current,
       });
       if (result.updatedCount !== 1) {
         throw new Error('Dashboard 비고 셀이 수정되지 않았습니다.');
       }
-      setStocks((prev) =>
-        prev.map((stock) =>
-          stock.locationId === locationId ? { ...stock, remarks } : stock
-        )
-      );
+      rememberDataVersion(result.dataVersion);
       const savedAtMs = Date.now();
       setSheetConfig((prev) => ({
         ...prev,
@@ -711,9 +749,9 @@ export default function App() {
         lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
-      void handleTriggerSync(undefined, { force: true, silent: true });
       return true;
     } catch (error) {
+      setStocks(previousStocks);
       const message =
         error instanceof Error ? error.message : 'Dashboard 비고 저장에 실패했습니다.';
       setSheetConfig((prev) => ({ ...prev, lastError: message }));
@@ -736,24 +774,42 @@ export default function App() {
       }));
       return false;
     }
+    const pendingMovements = movements.filter((movement) => !movement.sheetRows?.length);
+    if (pendingMovements.length === 0) {
+      const savedAtMs = Date.now();
+      setSheetConfig((prev) => ({
+        ...prev,
+        lastSavedAt: new Date(savedAtMs).toLocaleString('ko-KR'),
+        lastSavedAtMs: savedAtMs,
+        lastError: null,
+      }));
+      return true;
+    }
     isMutatingRef.current = true;
     try {
       const result = await saveAppDataToSheet({
         webhookUrl,
         sheetId: sheetConfigRef.current.sheetId,
         stocks,
-        movements,
+        movements: pendingMovements,
+        incremental: true,
+        knownDataVersion: knownDataVersionRef.current,
       });
-      if (result.movementRows) {
+      rememberDataVersion(result.dataVersion);
+      if (result.movementRows && Object.keys(result.movementRows).length > 0) {
         setMovements((prev) =>
-          prev.map((movement) => ({
-            ...movement,
-            sheetSynced: true,
-            sheetRows: (result.movementRows?.[movement.id] || []).map((ref) => ({
-              ...ref,
-              expectedDescription: movement.description,
-            })),
-          }))
+          prev.map((movement) => {
+            const refs = result.movementRows?.[movement.id];
+            if (!refs?.length) return movement;
+            return {
+              ...movement,
+              sheetSynced: true,
+              sheetRows: refs.map((ref) => ({
+                ...ref,
+                expectedDescription: movement.description,
+              })),
+            };
+          })
         );
       }
       const savedAtMs = Date.now();
@@ -763,7 +819,6 @@ export default function App() {
         lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
-      void handleTriggerSync(undefined, { force: true, silent: true });
       return true;
     } catch (error) {
       setSheetConfig((prev) => ({
@@ -816,12 +871,16 @@ export default function App() {
         };
       });
     isMutatingRef.current = true;
+    const previousMovements = movements;
+    setMovements((prev) => prev.filter((movement) => !movementIds.includes(movement.id)));
     try {
       const result = await deleteMovementsFromSheet({
         webhookUrl: sheetConfigRef.current.webhookUrl || '',
         sheetId: sheetConfigRef.current.sheetId,
         movements: targets,
+        knownDataVersion: knownDataVersionRef.current,
       });
+      rememberDataVersion(result.dataVersion);
       const expectedRows = targets.reduce(
         (count, movement) => count + (movement.sheetRows?.length || 0),
         0
@@ -831,7 +890,6 @@ export default function App() {
           `삭제 요청 ${expectedRows}건 중 ${result.deletedCount}건만 시트에 반영되었습니다. 시트를 다시 불러와 확인해 주세요.`
         );
       }
-      setMovements((prev) => prev.filter((movement) => !movementIds.includes(movement.id)));
       const savedAtMs = Date.now();
       setSheetConfig((prev) => ({
         ...prev,
@@ -839,9 +897,9 @@ export default function App() {
         lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
-      void handleTriggerSync(undefined, { force: true, silent: true });
       return { ok: true };
     } catch (error) {
+      setMovements(previousMovements);
       const message =
         error instanceof Error ? error.message : '시트에서 내역을 삭제하지 못했습니다.';
       setSheetConfig((prev) => ({
@@ -871,20 +929,28 @@ export default function App() {
       notes
     );
     isMutatingRef.current = true;
+    const previousStocks = stocks;
+    const previousMovements = movements;
+    setStocks(updatedStocks);
+    setMovements((prev) =>
+      sortMovementsAscending([...prev, { ...createdMovement, sheetSynced: false }])
+    );
     try {
       const result = await saveMovementToSheet({
         webhookUrl: sheetConfigRef.current.webhookUrl || '',
         sheetId: sheetConfigRef.current.sheetId,
         movement: createdMovement,
         stocks: updatedStocks,
+        knownDataVersion: knownDataVersionRef.current,
       });
       if (result.appendedCount < 1) {
         throw new Error('조립 내역이 시트에 추가되지 않았습니다.');
       }
+      rememberDataVersion(result.dataVersion);
       setStocks(result.stocks || updatedStocks);
       setMovements((prev) =>
         sortMovementsAscending([
-          ...prev,
+          ...prev.filter((movement) => movement.id !== createdMovement.id),
           {
             ...createdMovement,
             sheetRows: result.appends?.map((ref) => ({
@@ -902,9 +968,10 @@ export default function App() {
         lastSavedAtMs: savedAtMs,
         lastError: null,
       }));
-      void handleTriggerSync(undefined, { force: true, silent: true });
       return true;
     } catch (error) {
+      setStocks(previousStocks);
+      setMovements(previousMovements);
       setSheetConfig((prev) => ({
         ...prev,
         lastError:
@@ -1036,6 +1103,49 @@ export default function App() {
     if (!sheetConfig.sheetId) return;
     void handleTriggerSync(sheetConfig.sheetId, { force: true, silent: true });
   }, [handleTriggerSync, sheetConfig.sheetId]);
+
+  useEffect(() => {
+    const webhookUrl = sheetConfig.webhookUrl;
+    const sheetId = sheetConfig.sheetId;
+    if (!webhookUrl || !sheetId) return;
+    let cancelled = false;
+
+    const pullVersion = async () => {
+      if (document.visibilityState === 'hidden' || isMutatingRef.current) return;
+      if (movementsRef.current.some((movement) => !movement.sheetRows?.length)) return;
+      try {
+        const response = await fetch(
+          `/api/sheet-version?webhookUrl=${encodeURIComponent(webhookUrl)}`,
+          { cache: 'no-store' }
+        );
+        if (!response.ok || cancelled) return;
+        const body = (await response.json()) as { dataVersion?: unknown };
+        if (typeof body.dataVersion !== 'number') return;
+        const previous = knownDataVersionRef.current;
+        if (previous == null) {
+          knownDataVersionRef.current = body.dataVersion;
+          return;
+        }
+        if (previous === body.dataVersion || isMutatingRef.current) return;
+        knownDataVersionRef.current = body.dataVersion;
+        void handleTriggerSync(sheetId, { force: true, silent: true });
+      } catch {
+        // 이전 Apps Script는 데이터 버전을 주지 않는다.
+      }
+    };
+
+    void pullVersion();
+    const timer = window.setInterval(() => void pullVersion(), 20_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void pullVersion();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [handleTriggerSync, sheetConfig.sheetId, sheetConfig.webhookUrl]);
 
   const handleSelectTab = useCallback((nextTab: NavTab) => {
     setActiveTab(nextTab);

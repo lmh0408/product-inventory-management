@@ -5,6 +5,7 @@ export interface SheetSaveResult {
   appendedCount: number;
   updatedCount: number;
   deletedCount: number;
+  dataVersion?: number;
   appends?: SheetRowReference[];
   movementRows?: Record<string, SheetRowReference[]>;
   stocks?: LocationStock[];
@@ -76,6 +77,7 @@ async function postSheetSave(body: Record<string, unknown>): Promise<SheetSaveRe
         appendedCount?: number;
         updatedCount?: number;
         deletedCount?: number;
+        dataVersion?: number;
         appends?: SheetRowReference[];
         movementRows?: Record<string, SheetRowReference[]>;
         stocks?: LocationStock[];
@@ -90,11 +92,16 @@ async function postSheetSave(body: Record<string, unknown>): Promise<SheetSaveRe
     appendedCount: Number(parsed.appendedCount || 0),
     updatedCount: Number(parsed.updatedCount || 0),
     deletedCount: Number(parsed.deletedCount || 0),
+    ...(typeof parsed.dataVersion === 'number' ? { dataVersion: parsed.dataVersion } : {}),
     appends: parsed.appends,
     movementRows: parsed.movementRows,
     stocks: parsed.stocks,
     movements: parsed.movements,
   };
+}
+
+function knownVersionField(version: number | null | undefined) {
+  return typeof version === 'number' ? { knownDataVersion: version } : {};
 }
 
 function stockPayload(stocks: LocationStock[]) {
@@ -113,6 +120,8 @@ export async function saveAppDataToSheet(params: {
   sourceMovementIds?: string[];
   originalMovements?: StockMovement[];
   replacementMovements?: StockMovement[];
+  incremental?: boolean;
+  knownDataVersion?: number | null;
 }): Promise<SheetSaveResult> {
   return postSheetSave({
     action: 'SYNC_APP_DATA',
@@ -123,6 +132,8 @@ export async function saveAppDataToSheet(params: {
     sourceMovementIds: params.sourceMovementIds,
     originalMovements: params.originalMovements,
     replacementMovements: params.replacementMovements,
+    ...(params.incremental ? { incremental: true } : {}),
+    ...knownVersionField(params.knownDataVersion),
   });
 }
 
@@ -131,6 +142,7 @@ export async function saveMovementToSheet(params: {
   sheetId: string;
   movement: StockMovement;
   stocks: LocationStock[];
+  knownDataVersion?: number | null;
 }): Promise<SheetSaveResult> {
   return postSheetSave({
     action: 'SAVE_MOVEMENT',
@@ -151,6 +163,7 @@ export async function saveMovementToSheet(params: {
       })),
     },
     stocks: stockPayload(params.stocks),
+    ...knownVersionField(params.knownDataVersion),
   });
 }
 
@@ -159,6 +172,7 @@ export async function saveDashboardRemark(params: {
   sheetId: string;
   locationId: LocationStock['locationId'];
   value: string;
+  knownDataVersion?: number | null;
 }): Promise<SheetSaveResult> {
   return postSheetSave({
     action: 'UPDATE_DASHBOARD_REMARK',
@@ -168,6 +182,7 @@ export async function saveDashboardRemark(params: {
       locationId: params.locationId,
       value: params.value,
     },
+    ...knownVersionField(params.knownDataVersion),
   });
 }
 
@@ -190,6 +205,7 @@ export async function deleteMovementsFromSheet(params: {
   webhookUrl: string;
   sheetId: string;
   movements: StockMovement[];
+  knownDataVersion?: number | null;
 }): Promise<SheetSaveResult> {
   const deletes = params.movements.flatMap((movement) =>
     (movement.sheetRows || []).map((ref, index) => ({
@@ -223,5 +239,6 @@ export async function deleteMovementsFromSheet(params: {
     webhookUrl: params.webhookUrl.trim(),
     sheetId: params.sheetId,
     deletes,
+    ...knownVersionField(params.knownDataVersion),
   });
 }

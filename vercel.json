@@ -10,6 +10,9 @@
     },
     "api/google-sheet/[sheetId].js": {
       "maxDuration": 60
+    },
+    "api/sheet-version.js": {
+      "maxDuration": 20
     }
   }
 }

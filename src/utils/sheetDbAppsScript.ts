@@ -1,18 +1,30 @@
 /** Google Apps Script 웹앱 소스. 시트 [확장 프로그램] → [Apps Script]에 붙여넣고 웹 앱으로 배포합니다. */
 export const SHEET_DB_APPS_SCRIPT = `function doGet() {
-  return json_({ ok: true, service: "SheetStock DB", version: 9 });
+  return json_({
+    ok: true,
+    service: "SheetStock DB",
+    version: 10,
+    dataVersion: currentDataVersion_(),
+  });
+}
+
+function currentDataVersion_() {
+  return Number(PropertiesService.getScriptProperties().getProperty("dataVersion") || 0);
+}
+
+function bumpDataVersion_() {
+  var props = PropertiesService.getScriptProperties();
+  var next = Number(props.getProperty("dataVersion") || 0) + 1;
+  props.setProperty("dataVersion", String(next));
+  return next;
 }
 
 function doPost(e) {
-  var lock = LockService.getScriptLock();
-  var locked = false;
   try {
-    lock.waitLock(30000);
-    locked = true;
     if (!e || !e.postData || !e.postData.contents) {
       return json_({
         ok: false,
-        version: 9,
+        version: 10,
         error: "POST 본문이 없습니다. 웹 앱 액세스를 모든 사용자로 다시 배포했는지 확인하세요.",
       });
     }
@@ -22,35 +34,47 @@ function doPost(e) {
       : SpreadsheetApp.getActiveSpreadsheet();
     activeSs_ = ss;
     requestCatalog_ = null;
-    var result;
-    if (payload.action === "SYNC_APP_DATA") {
-      result = replaceLedgers_(ss, payload.replacements || [], payload.updates || []);
-    } else if (payload.action === "DELETE_MOVEMENTS") {
-      result = deleteRows_(ss, payload.deletes || []);
-    } else if (payload.action === "SAVE_MASTER_DATA") {
-      if (payload.structure) applyMasterStructure_(ss, payload.structure);
-      result = writeMasterData_(ss, payload.sheetName, payload.rows || []);
-    } else if ((payload.appends && payload.appends.length) || (payload.updates && payload.updates.length)) {
-      result = applyWrites_(ss, payload.appends || [], payload.updates || []);
-    } else {
-      throw new Error("반영할 시트 변경사항이 없습니다. 앱의 Apps Script 코드를 최신 버전으로 다시 배포하세요.");
+    var lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    try {
+      if (payload.knownDataVersion != null && payload.knownDataVersion !== "") {
+        var known = Number(payload.knownDataVersion);
+        if (known !== currentDataVersion_()) {
+          throw new Error("다른 팀원이 먼저 수정했습니다. 시트를 불러온 뒤 다시 저장하세요.");
+        }
+      }
+      var result;
+      if (payload.action === "SYNC_APP_DATA" && payload.replacements && payload.replacements.length) {
+        result = replaceLedgers_(ss, payload.replacements || [], payload.updates || []);
+      } else if (payload.action === "DELETE_MOVEMENTS") {
+        result = deleteRows_(ss, payload.deletes || []);
+      } else if (payload.action === "SAVE_MASTER_DATA") {
+        if (payload.structure) applyMasterStructure_(ss, payload.structure);
+        result = writeMasterData_(ss, payload.sheetName, payload.rows || []);
+      } else if ((payload.appends && payload.appends.length) || (payload.updates && payload.updates.length)) {
+        result = applyWrites_(ss, payload.appends || [], payload.updates || []);
+      } else {
+        throw new Error("반영할 시트 변경사항이 없습니다. 앱의 Apps Script 코드를 최신 버전으로 다시 배포하세요.");
+      }
+      SpreadsheetApp.flush();
+      var dataVersion = bumpDataVersion_();
+      return json_({
+        ok: true,
+        version: 10,
+        dataVersion: dataVersion,
+        appendedCount: result.appendedCount || 0,
+        updatedCount: result.updatedCount || 0,
+        deletedCount: result.deletedCount || 0,
+      });
+    } finally {
+      lock.releaseLock();
     }
-    SpreadsheetApp.flush();
-    return json_({
-      ok: true,
-      version: 9,
-      appendedCount: result.appendedCount || 0,
-      updatedCount: result.updatedCount || 0,
-      deletedCount: result.deletedCount || 0,
-    });
   } catch (err) {
     return json_({
       ok: false,
-      version: 9,
+      version: 10,
       error: String(err && err.message ? err.message : err),
     });
-  } finally {
-    if (locked) lock.releaseLock();
   }
 }
 
@@ -457,7 +481,12 @@ function deleteRows_(ss, deletes) {
     var deleteItem = resolved[j];
     var deleteSheet = ss.getSheetByName(deleteItem.sheetName);
     if (!deleteSheet) throw new Error("삭제할 탭을 찾지 못했습니다: " + deleteItem.sheetName);
-    deleteSheet.deleteRow(Number(deleteItem.row));
+    var deleteMeta = contexts[deleteItem.sheetName].meta;
+    deleteSheet.getRange(Number(deleteItem.row), deleteMeta.typeCol).setValue("삭제");
+    var productKeys = Object.keys(deleteMeta.productCols || {});
+    for (var p = 0; p < productKeys.length; p++) {
+      deleteSheet.getRange(Number(deleteItem.row), deleteMeta.productCols[productKeys[p]]).setValue("");
+    }
     deletedCount++;
   }
   return { appendedCount: 0, updatedCount: 0, deletedCount: deletedCount };

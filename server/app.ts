@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ZipArchive } from 'archiver';
 import {
+  fetchSheetDataVersion,
   handleGoogleSheetExport,
   handleGoogleSheetSave,
   saveErrorResult,
@@ -108,6 +109,18 @@ export async function createServer() {
       if (!res.headersSent) {
         res.status(500).json({ error: '소스 코드 다운로드 생성에 실패했습니다.' });
       }
+    }
+  });
+
+  app.get('/api/sheet-version', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const webhookUrl = String(req.query.webhookUrl || '');
+    try {
+      const result = await fetchSheetDataVersion(webhookUrl);
+      res.status(result.status).json(result.json);
+    } catch (error) {
+      const result = saveErrorResult(error);
+      res.status(result.status).json(result.json);
     }
   });
 

@@ -353,7 +353,9 @@ function parseMovementSheet(
   for (let r = headerIndex + 1; r < rows.length; r++) {
     const row = rows[r] || [];
     const date = dateIdx >= 0 ? cellToDate(row[dateIdx]) : null;
-    const type = parseMovementType(typeIdx >= 0 ? cellText(row[typeIdx]) : '');
+    const typeText = typeIdx >= 0 ? cellText(row[typeIdx]) : '';
+    if (typeText === '삭제') continue;
+    const type = parseMovementType(typeText);
     const description = descIdx >= 0 ? cellText(row[descIdx]) : '';
     if (!date || !type) continue;
     const isAdjustment = type === 'ADJUSTMENT' || /보정/.test(description);
